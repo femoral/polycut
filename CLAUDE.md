@@ -1,5 +1,9 @@
 # polycut
 
+## Commit workflow
+
+One issue at a time, one commit per issue, pushed directly to `master` (no PRs). Before **every** commit the orchestrator runs two read-only Sonnet guard subagents on the staged changes — `privacy-guard` (no leaked PII/secrets/machine details) and `design-system-guard` (conforms to `docs/design-system.md`). Both PASS → commit + push. Either FAILS → relay findings, user decides. See `docs/agents/commit-workflow.md`.
+
 ## Agent skills
 
 ### Issue tracker
