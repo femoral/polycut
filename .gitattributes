@@ -1,0 +1,2 @@
+tests/fixtures/meshy_sofa/model.obj filter=lfs diff=lfs merge=lfs -text
+tests/fixtures/meshy_sofa/model_baseColor.png filter=lfs diff=lfs merge=lfs -text
