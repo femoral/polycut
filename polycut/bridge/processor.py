@@ -15,7 +15,14 @@ from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
-from polycut.core import export_collada, load_source_model, simplify_model
+from polycut.core import (
+    export_collada,
+    load_source_model,
+    scale_factor,
+    scale_geometry,
+    simplify_model,
+)
+from polycut.core.scale import UNIT_METERS, UNIT_NAMES
 
 DEFAULT_REDUCTION = 0.25  # keep ~25% of faces — the −75% default applied on load
 MIN_FACES = 100  # floor so the slider can't collapse the mesh to nothing
@@ -42,6 +49,7 @@ class Processor(QObject):
     statsChanged = Signal()
     busyChanged = Signal()
     statusChanged = Signal()
+    scaleChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -56,6 +64,10 @@ class Processor(QObject):
         self._simplify_guard = threading.Lock()
         self._pending_target = None
         self._simplify_active = False
+        # scale + units — baked into the geometry at export, target unit declared
+        self._scale_multiplier = 1.0
+        self._source_unit = "m"
+        self._target_unit = "m"
 
     def _current(self):
         """The model the UI reflects and export writes: simplified if present."""
@@ -164,6 +176,7 @@ class Processor(QObject):
         self._set_busy(False)
         self._set_status(f"Loaded {source.name}")
         self.statsChanged.emit()
+        self.scaleChanged.emit()  # refresh the size readout for the new model
         self.modelLoaded.emit()
         self.simplify(self._target)  # apply the default −75% reduction
 
@@ -212,6 +225,7 @@ class Processor(QObject):
             self._set_busy(False)
             self._set_status(f"Simplified to {simplified.face_count:,} faces")
             self.statsChanged.emit()
+            self.scaleChanged.emit()  # the size readout follows the new geometry
             self.simplifyFinished.emit()
             return
 
@@ -220,6 +234,57 @@ class Processor(QObject):
         if not self._model:
             return max(MIN_FACES, target)
         return max(MIN_FACES, min(target, self._model.face_count))
+
+    # ---- scale + units -------------------------------------------------
+    def _get_units(self) -> list:
+        return list(UNIT_METERS.keys())
+
+    units = Property("QVariantList", _get_units, constant=True)
+
+    def _get_scale_multiplier(self) -> float:
+        return self._scale_multiplier
+
+    def _set_scale_multiplier(self, value: float) -> None:
+        value = float(value)
+        if value > 0 and value != self._scale_multiplier:
+            self._scale_multiplier = value
+            self.scaleChanged.emit()
+
+    scaleMultiplier = Property(
+        float, _get_scale_multiplier, _set_scale_multiplier, notify=scaleChanged
+    )
+
+    def _get_source_unit(self) -> str:
+        return self._source_unit
+
+    def _set_source_unit(self, value: str) -> None:
+        if value in UNIT_METERS and value != self._source_unit:
+            self._source_unit = value
+            self.scaleChanged.emit()
+
+    sourceUnit = Property(str, _get_source_unit, _set_source_unit, notify=scaleChanged)
+
+    def _get_target_unit(self) -> str:
+        return self._target_unit
+
+    def _set_target_unit(self, value: str) -> None:
+        if value in UNIT_METERS and value != self._target_unit:
+            self._target_unit = value
+            self.scaleChanged.emit()
+
+    targetUnit = Property(str, _get_target_unit, _set_target_unit, notify=scaleChanged)
+
+    def _get_scaled_dimensions(self) -> str:
+        """The model's resulting real-world size in the target unit — the §7 delta."""
+        model = self._current()
+        if model is None:
+            return ""
+        factor = scale_factor(self._scale_multiplier, self._source_unit, self._target_unit)
+        lo, hi = model.geometry.bounds
+        ext = (hi - lo) * factor
+        return f"{ext[0]:.3g} × {ext[1]:.3g} × {ext[2]:.3g} {self._target_unit}"
+
+    scaledDimensions = Property(str, _get_scaled_dimensions, notify=scaleChanged)
 
     # ---- export --------------------------------------------------------
     @Slot(str)
@@ -234,7 +299,18 @@ class Processor(QObject):
 
     def _export_worker(self, out: Path) -> None:
         try:
-            result = export_collada(self._current(), out)
+            model = self._current()
+            factor = scale_factor(
+                self._scale_multiplier, self._source_unit, self._target_unit
+            )
+            if factor != 1.0:
+                model = scale_geometry(model, factor)
+            result = export_collada(
+                model,
+                out,
+                unit_name=UNIT_NAMES[self._target_unit],
+                unit_meters=UNIT_METERS[self._target_unit],
+            )
         except Exception as exc:
             self._set_busy(False)
             self._set_status("Export failed")

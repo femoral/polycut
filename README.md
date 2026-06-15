@@ -8,11 +8,12 @@ design system and ADRs.
 
 ## Status
 
-MVP-1 in progress (see issue #1). **Slices 1–2** are in place: open an `.obj` →
+MVP-1 in progress (see issue #1). **Slices 1–3** are in place: open an `.obj` →
 resolve its `.mtl` + texture → **simplify** (texture-preserving quadric decimation,
-default −75%, with a reduction slider + target-face input) → "Export to SketchUp"
-writes a textured `.dae` with the texture copied beside it. No scale step yet
-(Slice 3).
+default −75%, with a reduction slider + target-face input) → **scale** (multiplier +
+source/target units, baked into the geometry with the unit declared in the `.dae`) →
+"Export to SketchUp" writes a textured `.dae` with the texture copied beside it.
+Windows packaging is the remaining MVP-1 slice.
 
 ## Architecture
 

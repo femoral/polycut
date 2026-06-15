@@ -8,8 +8,10 @@ suite pays the cost a single time.
 from pathlib import Path
 
 import pytest
+import trimesh
 
 from polycut.core import export_collada, load_source_model, simplify_model
+from polycut.core.model import SourceModel
 
 DEFAULT_REDUCTION = 0.25  # keep ~25% of faces (the −75% default applied on load)
 
@@ -27,6 +29,19 @@ def exported_sofa(sofa_model, tmp_path_factory):
     out = tmp_path_factory.mktemp("export") / "sofa.dae"
     result = export_collada(sofa_model, out)
     return out, result, sofa_model
+
+
+@pytest.fixture
+def box_model():
+    """A 1×1×1 unit cube — a fast, exact stand-in for geometry/scale tests."""
+    box = trimesh.creation.box(extents=(1.0, 1.0, 1.0))
+    return SourceModel(
+        source_path=Path("box.obj"),
+        geometry=box,
+        face_count=int(box.faces.shape[0]),
+        object_count=1,
+        texture_path=None,
+    )
 
 
 @pytest.fixture(scope="session")

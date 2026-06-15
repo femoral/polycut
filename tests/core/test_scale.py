@@ -1,0 +1,67 @@
+"""Scale + units — sizing a Source model for SketchUp (no up-axis control)."""
+
+from __future__ import annotations
+
+import numpy as np
+import pytest
+
+import trimesh
+
+from polycut.core import export_collada, scale_factor, scale_geometry
+from polycut.core.model import SourceModel
+
+
+def _extents(geometry):
+    lo, hi = geometry.bounds
+    return hi - lo
+
+
+def test_scale_geometry_scales_bounding_box(box_model):
+    """A scale factor multiplies the model's bounding-box dimensions."""
+    result = scale_geometry(box_model, 2.0)
+
+    assert np.allclose(_extents(result.geometry), _extents(box_model.geometry) * 2.0)
+    assert result.face_count == box_model.face_count  # scaling keeps topology
+
+
+def test_scale_factor_converts_units():
+    """Source/target units produce the right ratio; the multiplier rides on top."""
+    assert scale_factor(1.0, "m", "m") == 1.0
+    assert scale_factor(2.0, "m", "m") == 2.0
+    assert scale_factor(1.0, "m", "cm") == 100.0
+    assert scale_factor(1.0, "cm", "m") == pytest.approx(0.01)
+    assert scale_factor(1.0, "in", "mm") == pytest.approx(25.4)
+
+
+def test_scale_keeps_precomputed_normals(box_model):
+    """Scaling carries normals across so a heavy export needn't recompute them.
+
+    Decimated meshes ship their normals (the export reads them directly); if a
+    scale dropped that cache the export would fall back to a slow recompute.
+    """
+    from pathlib import Path
+
+    box = box_model.geometry
+    mesh = trimesh.Trimesh(
+        vertices=box.vertices, faces=box.faces, vertex_normals=box.vertex_normals,
+        process=False,
+    )
+    model = SourceModel(Path("box.obj"), mesh, mesh.faces.shape[0], 1, None)
+    before = mesh.vertex_normals.copy()
+
+    scaled = scale_geometry(model, 3.0)
+
+    assert "vertex_normals" in scaled.geometry._cache  # not dropped → export stays cheap
+    assert np.allclose(scaled.geometry.vertex_normals, before)  # unit normals unchanged
+
+
+def test_scaled_export_declares_target_unit(box_model, tmp_path):
+    """The exported .dae declares the target unit so SketchUp sizes it right."""
+    scaled = scale_geometry(box_model, scale_factor(1.0, "m", "cm"))  # ×100
+    out = tmp_path / "box.dae"
+
+    export_collada(scaled, out, unit_name="centimeter", unit_meters=0.01)
+
+    text = out.read_text(errors="ignore")
+    assert 'name="centimeter"' in text
+    assert 'meter="0.01"' in text

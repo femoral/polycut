@@ -30,19 +30,23 @@ class ExportResult:
     texture_count: int
 
 
-def export_collada(model, output_path) -> ExportResult:
+def export_collada(
+    model, output_path, unit_name: str = "meter", unit_meters: float = 1.0
+) -> ExportResult:
     """Write ``model`` to a textured ``.dae`` and report what was produced.
 
-    The geometry passes through unchanged (no simplify/scale in this slice).
-    When the model carries a texture it is copied next to the output and
-    referenced by relative name, so the ``.dae`` and its image travel together.
+    ``unit_name``/``unit_meters`` are declared in the Collada ``<unit>`` metadata
+    so SketchUp imports at the correct real-world size; the geometry itself is
+    already baked to scale by the caller. When the model carries a texture it is
+    copied next to the output and referenced by relative name, so the ``.dae``
+    and its image travel together.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     texture_name = _copy_texture(model, output_path.parent)
     mesh = _single_mesh(model.geometry)
-    _write_collada(mesh, output_path, texture_name)
+    _write_collada(mesh, output_path, texture_name, unit_name, unit_meters)
 
     return ExportResult(
         output_path=output_path,
@@ -69,9 +73,17 @@ def _single_mesh(geom) -> trimesh.Trimesh:
     return geom
 
 
-def _write_collada(mesh: trimesh.Trimesh, output_path: Path, texture_name: str | None) -> None:
+def _write_collada(
+    mesh: trimesh.Trimesh,
+    output_path: Path,
+    texture_name: str | None,
+    unit_name: str = "meter",
+    unit_meters: float = 1.0,
+) -> None:
     """Build a Collada document for ``mesh`` (textured if ``texture_name``)."""
     doc = Collada()
+    doc.assetInfo.unitname = unit_name
+    doc.assetInfo.unitmeter = unit_meters
 
     effect, materials, images = _build_material(doc, texture_name)
     doc.effects.append(effect)
@@ -116,7 +128,10 @@ def _build_geometry(doc: Collada, mesh: trimesh.Trimesh) -> geometry.Geometry:
     normal_src = source.FloatSource(
         "normals-array", np.asarray(mesh.vertex_normals, dtype=np.float32).ravel(), ("X", "Y", "Z")
     )
-    uv = mesh.visual.uv if mesh.visual.uv is not None else np.zeros((len(mesh.vertices), 2))
+    # untextured meshes carry ColorVisuals (no .uv); fall back to a zero map
+    uv = getattr(mesh.visual, "uv", None)
+    if uv is None:
+        uv = np.zeros((len(mesh.vertices), 2))
     uv_src = source.FloatSource(
         "uv-array", np.asarray(uv, dtype=np.float32).ravel(), ("S", "T")
     )

@@ -285,6 +285,12 @@ ApplicationWindow {
                             Layout.fillWidth: true
                         }
 
+                        // Transform — scale multiplier + source/target units.
+                        TransformPanel {
+                            visible: processor.hasModel
+                            Layout.fillWidth: true
+                        }
+
                         // Texture status — warning shown inline (§7), coral when missing.
                         RowLayout {
                             visible: processor.hasModel

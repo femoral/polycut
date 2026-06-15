@@ -3,5 +3,7 @@ singleton Theme Theme.qml
 PillButton PillButton.qml
 Section Section.qml
 SimplifyPanel SimplifyPanel.qml
+TransformPanel TransformPanel.qml
+UnitSelect UnitSelect.qml
 EmptyState EmptyState.qml
 Toast Toast.qml
