@@ -50,6 +50,12 @@ class Processor(QObject):
         self._target = 0  # requested target face count
         self._busy = False
         self._status = "Awaiting import"
+        # PyMeshLab is not thread-safe — serialize decimations. _pending_target
+        # holds the latest requested target; one worker drains it, coalescing
+        # rapid slider releases so only the most recent target actually runs.
+        self._simplify_guard = threading.Lock()
+        self._pending_target = None
+        self._simplify_active = False
 
     def _current(self):
         """The model the UI reflects and export writes: simplified if present."""
@@ -170,23 +176,44 @@ class Processor(QObject):
         self._set_status("Simplifying…")
         self._set_busy(True)
         self.statsChanged.emit()  # reflect the new target on the input immediately
-        threading.Thread(
-            target=self._simplify_worker, args=(self._target,), daemon=True
-        ).start()
+        with self._simplify_guard:
+            self._pending_target = self._target
+            if self._simplify_active:
+                return  # a worker is running — it will pick up this latest target
+            self._simplify_active = True
+        threading.Thread(target=self._simplify_loop, daemon=True).start()
 
-    def _simplify_worker(self, target: int) -> None:
-        try:
-            simplified = simplify_model(self._model, target)
-        except Exception as exc:
+    def _simplify_loop(self) -> None:
+        """Drain pending targets one at a time; never two decimations at once."""
+        while True:
+            with self._simplify_guard:
+                target = self._pending_target
+                self._pending_target = None
+                if target is None:
+                    self._simplify_active = False
+                    return
+
+            try:
+                simplified = simplify_model(self._model, target)
+            except Exception as exc:
+                with self._simplify_guard:
+                    self._simplify_active = False
+                    self._pending_target = None
+                self._set_busy(False)
+                self._set_status("Simplify failed")
+                self.simplifyFailed.emit(str(exc))
+                return
+
+            self._simplified = simplified
+            with self._simplify_guard:
+                if self._pending_target is not None:
+                    continue  # a newer target arrived mid-run — serve it next
+                self._simplify_active = False
             self._set_busy(False)
-            self._set_status("Simplify failed")
-            self.simplifyFailed.emit(str(exc))
+            self._set_status(f"Simplified to {simplified.face_count:,} faces")
+            self.statsChanged.emit()
+            self.simplifyFinished.emit()
             return
-        self._simplified = simplified
-        self._set_busy(False)
-        self._set_status(f"Simplified to {simplified.face_count:,} faces")
-        self.statsChanged.emit()
-        self.simplifyFinished.emit()
 
     def _clamp_target(self, target: int) -> int:
         """Keep the target within [MIN_FACES, original] — no up-sampling, no zero."""
