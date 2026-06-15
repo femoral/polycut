@@ -8,12 +8,14 @@ design system and ADRs.
 
 ## Status
 
-MVP-1 in progress (see issue #1). **Slices 1–4** are in place: open an `.obj` →
+MVP-1 is complete (issue #1). **All slices** shipped: open an `.obj` →
 resolve its `.mtl` + texture → **simplify** (texture-preserving quadric decimation,
 default −75%, with a reduction slider + target-face input) → **scale** (multiplier +
 source/target units, baked into the geometry with the unit declared in the `.dae`) →
 "Export to SketchUp" writes a textured `.dae` with the texture copied beside it.
-**Windows packaging** ships a single-file `.exe` (no install) built in CI.
+**Windows packaging** ships a self-contained build (no install) built in CI, and
+you can **open another model** without restarting. Next up is MVP-2 (issue #7): a
+live 3D viewport with before/after preview.
 
 ## Architecture
 
