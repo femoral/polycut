@@ -15,7 +15,10 @@ from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
-from polycut.core import export_collada, load_source_model
+from polycut.core import export_collada, load_source_model, simplify_model
+
+DEFAULT_REDUCTION = 0.25  # keep ~25% of faces — the −75% default applied on load
+MIN_FACES = 100  # floor so the slider can't collapse the mesh to nothing
 
 
 def _to_path(value: str) -> Path:
@@ -30,6 +33,8 @@ class Processor(QObject):
     # results
     modelLoaded = Signal()
     loadFailed = Signal(str)
+    simplifyFinished = Signal()
+    simplifyFailed = Signal(str)
     exportFinished = Signal(str, float, int, int)  # path, sizeBytes, faceCount, textureCount
     exportFailed = Signal(str)
 
@@ -40,9 +45,15 @@ class Processor(QObject):
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
-        self._model = None
+        self._model = None  # the loaded original (source for re-simplify)
+        self._simplified = None  # current decimated model; what export writes
+        self._target = 0  # requested target face count
         self._busy = False
         self._status = "Awaiting import"
+
+    def _current(self):
+        """The model the UI reflects and export writes: simplified if present."""
+        return self._simplified or self._model
 
     # ---- busy / status -------------------------------------------------
     def _get_busy(self) -> bool:
@@ -77,9 +88,29 @@ class Processor(QObject):
     fileName = Property(str, _get_file_name, notify=statsChanged)
 
     def _get_face_count(self) -> int:
-        return self._model.face_count if self._model else 0
+        """The current (post-simplify) face count — the hero readout."""
+        current = self._current()
+        return current.face_count if current else 0
 
     faceCount = Property(int, _get_face_count, notify=statsChanged)
+
+    def _get_original_face_count(self) -> int:
+        return self._model.face_count if self._model else 0
+
+    originalFaceCount = Property(int, _get_original_face_count, notify=statsChanged)
+
+    def _get_target_face_count(self) -> int:
+        return self._target
+
+    targetFaceCount = Property(int, _get_target_face_count, notify=statsChanged)
+
+    def _get_reduction_percent(self) -> int:
+        """How much the mesh has shrunk from the original, for the −NN% badge."""
+        if not self._model or self._model.face_count == 0:
+            return 0
+        return round((1 - self._get_face_count() / self._model.face_count) * 100)
+
+    reductionPercent = Property(int, _get_reduction_percent, notify=statsChanged)
 
     def _get_object_count(self) -> int:
         return self._model.object_count if self._model else 0
@@ -122,10 +153,46 @@ class Processor(QObject):
             self.loadFailed.emit(str(exc))
             return
         self._model = model
+        self._simplified = None  # show the original until the default reduction lands
+        self._target = self._clamp_target(round(model.face_count * DEFAULT_REDUCTION))
         self._set_busy(False)
         self._set_status(f"Loaded {source.name}")
         self.statsChanged.emit()
         self.modelLoaded.emit()
+        self.simplify(self._target)  # apply the default −75% reduction
+
+    # ---- simplify ------------------------------------------------------
+    @Slot(int)
+    def simplify(self, target_faces: int) -> None:
+        if self._model is None:
+            return
+        self._target = self._clamp_target(int(target_faces))
+        self._set_status("Simplifying…")
+        self._set_busy(True)
+        self.statsChanged.emit()  # reflect the new target on the input immediately
+        threading.Thread(
+            target=self._simplify_worker, args=(self._target,), daemon=True
+        ).start()
+
+    def _simplify_worker(self, target: int) -> None:
+        try:
+            simplified = simplify_model(self._model, target)
+        except Exception as exc:
+            self._set_busy(False)
+            self._set_status("Simplify failed")
+            self.simplifyFailed.emit(str(exc))
+            return
+        self._simplified = simplified
+        self._set_busy(False)
+        self._set_status(f"Simplified to {simplified.face_count:,} faces")
+        self.statsChanged.emit()
+        self.simplifyFinished.emit()
+
+    def _clamp_target(self, target: int) -> int:
+        """Keep the target within [MIN_FACES, original] — no up-sampling, no zero."""
+        if not self._model:
+            return max(MIN_FACES, target)
+        return max(MIN_FACES, min(target, self._model.face_count))
 
     # ---- export --------------------------------------------------------
     @Slot(str)
@@ -140,7 +207,7 @@ class Processor(QObject):
 
     def _export_worker(self, out: Path) -> None:
         try:
-            result = export_collada(self._model, out)
+            result = export_collada(self._current(), out)
         except Exception as exc:
             self._set_busy(False)
             self._set_status("Export failed")

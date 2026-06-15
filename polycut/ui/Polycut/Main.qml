@@ -117,11 +117,11 @@ ApplicationWindow {
 
                 Item { Layout.fillWidth: true }
 
-                // process breadcrumb — only steps that exist today (SIMPLIFY joins in Slice 2)
+                // process breadcrumb — steps that exist today: IMPORT → SIMPLIFY → EXPORT
                 RowLayout {
                     spacing: Theme.gapXs
                     Repeater {
-                        model: ["IMPORT", "EXPORT"]
+                        model: ["IMPORT", "SIMPLIFY", "EXPORT"]
                         delegate: RowLayout {
                             required property int index
                             required property string modelData
@@ -132,12 +132,12 @@ ApplicationWindow {
                                 font.pixelSize: Theme.fontMicro
                                 font.letterSpacing: Theme.headerSpacing
                                 color: {
-                                    var step = processor.hasModel ? 1 : 0;
+                                    var step = processor.hasModel ? 1 : 0;  // loaded → at SIMPLIFY
                                     return index === step ? Theme.teal : Theme.fg3;
                                 }
                             }
                             Text {
-                                visible: index < 1
+                                visible: index < 2
                                 text: "→"
                                 color: Theme.fg3
                                 font.pixelSize: Theme.fontMicro
@@ -279,64 +279,32 @@ ApplicationWindow {
                             font.pixelSize: Theme.fontSmall
                         }
 
-                        // Import stats — the hero face-count readout. Not a
-                        // canonical inspector section (Simplify → Preserve →
-                        // Transform → Materials arrive in later slices); it's a
-                        // header readout, so no uppercase section chrome.
-                        ColumnLayout {
+                        // Simplify — hero delta + reduction slider + target input.
+                        SimplifyPanel {
+                            visible: processor.hasModel
+                            Layout.fillWidth: true
+                        }
+
+                        // Texture status — warning shown inline (§7), coral when missing.
+                        RowLayout {
                             visible: processor.hasModel
                             Layout.fillWidth: true
                             spacing: Theme.gap
-
+                            Rectangle {
+                                implicitWidth: Theme.dotSize
+                                implicitHeight: Theme.dotSize
+                                radius: width / 2
+                                color: processor.hasTexture ? Theme.teal : Theme.coral
+                            }
                             Text {
-                                text: win.fmt(processor.faceCount)
-                                color: Theme.fg0
-                                font.family: Theme.fontMono
-                                font.pixelSize: Theme.fontHero
-                            }
-                            RowLayout {
-                                spacing: Theme.gap / 2
-                                Text {
-                                    text: "faces ·"
-                                    color: Theme.fg3
-                                    font.family: Theme.fontUi
-                                    font.pixelSize: Theme.fontSmall
-                                }
-                                Text {
-                                    text: processor.objectCount
-                                    color: Theme.fg2
-                                    font.family: Theme.fontMono
-                                    font.pixelSize: Theme.fontSmall
-                                }
-                                Text {
-                                    text: processor.objectCount === 1 ? "object" : "objects"
-                                    color: Theme.fg3
-                                    font.family: Theme.fontUi
-                                    font.pixelSize: Theme.fontSmall
-                                }
-                            }
-
-                            // Texture status — warning shown inline (§7), coral when missing.
-                            RowLayout {
+                                text: processor.hasTexture
+                                    ? processor.textureName
+                                    : "no texture found — export will be untextured"
+                                color: processor.hasTexture ? Theme.fg1 : Theme.coral
+                                font.family: processor.hasTexture ? Theme.fontMono : Theme.fontUi
+                                font.pixelSize: Theme.fontSmall
+                                wrapMode: Text.WordWrap
                                 Layout.fillWidth: true
-                                Layout.topMargin: Theme.gap
-                                spacing: Theme.gap
-                                Rectangle {
-                                    implicitWidth: Theme.dotSize
-                                    implicitHeight: Theme.dotSize
-                                    radius: width / 2
-                                    color: processor.hasTexture ? Theme.teal : Theme.coral
-                                }
-                                Text {
-                                    text: processor.hasTexture
-                                        ? processor.textureName
-                                        : "no texture found — export will be untextured"
-                                    color: processor.hasTexture ? Theme.fg1 : Theme.coral
-                                    font.family: processor.hasTexture ? Theme.fontMono : Theme.fontUi
-                                    font.pixelSize: Theme.fontSmall
-                                    wrapMode: Text.WordWrap
-                                    Layout.fillWidth: true
-                                }
                             }
                         }
                     }

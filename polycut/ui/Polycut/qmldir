@@ -2,5 +2,6 @@ module Polycut
 singleton Theme Theme.qml
 PillButton PillButton.qml
 Section Section.qml
+SimplifyPanel SimplifyPanel.qml
 EmptyState EmptyState.qml
 Toast Toast.qml

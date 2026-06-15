@@ -12,6 +12,8 @@ dependencies = [
     "pycollada>=0.8",
     "pillow>=10.0",
     "numpy>=1.26",
+    # GPLv3 — texture-preserving simplification (ADR-0002). Makes the bundle GPL.
+    "pymeshlab>=2025.7",
 ]
 
 [project.optional-dependencies]

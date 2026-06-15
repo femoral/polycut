@@ -8,10 +8,11 @@ design system and ADRs.
 
 ## Status
 
-MVP-1 in progress (see issue #1). **Slice 1 — walking skeleton** is in place:
-open an `.obj` → resolve its `.mtl` + texture → "Export to SketchUp" writes a
-textured `.dae` with the texture copied beside it. No simplify/scale yet
-(Slices 2–3).
+MVP-1 in progress (see issue #1). **Slices 1–2** are in place: open an `.obj` →
+resolve its `.mtl` + texture → **simplify** (texture-preserving quadric decimation,
+default −75%, with a reduction slider + target-face input) → "Export to SketchUp"
+writes a textured `.dae` with the texture copied beside it. No scale step yet
+(Slice 3).
 
 ## Architecture
 
@@ -32,9 +33,12 @@ python -m venv .venv
 .venv/bin/python -m pytest           # run the tests (-m "not slow" to skip the big fixture)
 ```
 
-> **NixOS:** the `numpy` / `PySide6` wheels are dynamically linked and need a
-> standard FHS environment to load their native libraries. Prefix the commands
-> above with an FHS wrapper (e.g. `steam-run`) or enable `nix-ld`.
+> **NixOS:** the `numpy` / `PySide6` / `pymeshlab` wheels are dynamically linked
+> and need a standard FHS environment to load their native libraries. Prefix the
+> commands above with an FHS wrapper (e.g. `steam-run`) or enable `nix-ld`.
+> `pymeshlab` additionally needs `libcom_err.so.2` on the library path — provide
+> it from your distro's `e2fsprogs`/`krb5` (e.g. via `LD_LIBRARY_PATH`) if the
+> FHS wrapper doesn't already.
 
 ## License
 
