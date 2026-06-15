@@ -43,15 +43,18 @@ python -m venv .venv
 
 ## Package (Windows)
 
-PyInstaller bundles the app — and PyMeshLab's native binaries — into one
-`.exe`, no Python install required. Cross-compiling isn't possible, so the build
-runs on a Windows runner in CI (`.github/workflows/windows-build.yml`) and
-attaches `Polycut.exe` to each run as a downloadable artifact. To build locally
-on Windows:
+PyInstaller bundles the app — and PyMeshLab's native binaries — into a
+self-contained folder, no Python install required. It's a one-directory build
+(the libs sit beside the `.exe`) so startup is near-instant; a one-file `.exe`
+would re-unpack its whole payload on every launch. Cross-compiling isn't
+possible, so the build runs on a Windows runner in CI
+(`.github/workflows/windows-build.yml`), which zips the folder and attaches it
+to each run as a downloadable artifact — unzip it and run the `Polycut.exe`
+inside. To build locally on Windows:
 
 ```sh
 pip install -e ".[gui,packaging]"
-pyinstaller --noconfirm --clean polycut.spec   # → dist/Polycut.exe
+pyinstaller --noconfirm --clean polycut.spec   # → dist/Polycut/
 ```
 
 ## License

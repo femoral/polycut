@@ -1,8 +1,9 @@
 name: Windows build
 
-# PyInstaller cannot cross-compile, so the Windows .exe is built on a Windows
-# runner (issue #5). The single-file artifact is attached to each run for
-# download and manual verification on a clean Windows 10/11 machine.
+# PyInstaller cannot cross-compile, so the Windows build runs on a Windows
+# runner (issue #5). It's a one-directory bundle (issue #17) for fast startup;
+# the folder is attached to each run (zipped) for download and manual
+# verification on a clean Windows 10/11 machine.
 
 on:
   push:
@@ -25,12 +26,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[gui,packaging]"
 
-      - name: Build one-file .exe
+      - name: Build one-directory bundle
         run: pyinstaller --noconfirm --clean polycut.spec
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
+          # upload-artifact zips the whole folder; the user unzips and runs the
+          # Polycut.exe inside it.
           name: Polycut-windows
-          path: dist/Polycut.exe
+          path: dist/Polycut
           if-no-files-found: error
