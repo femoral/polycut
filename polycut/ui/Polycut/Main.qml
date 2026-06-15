@@ -343,6 +343,15 @@ ApplicationWindow {
                     font.pixelSize: Theme.fontSmall
                 }
                 Item { Layout.fillWidth: true }
+                // Open another model without restarting — drag-drop already
+                // replaces the model, this makes it discoverable. Secondary so
+                // Export stays the one primary action. (design-system.md §6)
+                PillButton {
+                    text: "Open another"
+                    visible: processor.hasModel
+                    enabled: !processor.busy
+                    onClicked: openDialog.open()
+                }
                 PillButton {
                     text: "Export to SketchUp"
                     primary: true
