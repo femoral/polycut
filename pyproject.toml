@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polycut"
+version = "0.1.0"
+description = "Desktop tool that turns a high-poly Meshy Source model into a SketchUp-ready file (simplify + convert to DAE)."
+requires-python = ">=3.11"
+dependencies = [
+    "trimesh>=4.0",
+    "pycollada>=0.8",
+    "pillow>=10.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+gui = ["PySide6>=6.6"]
+dev = ["pytest>=8.0"]
+packaging = ["pyinstaller>=6.0"]
+
+[project.scripts]
+polycut = "polycut.app:main"
+
+[tool.setuptools.packages.find]
+include = ["polycut*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: exercises the full 646k-face Meshy fixture end-to-end (deselect with -m 'not slow')",
+]

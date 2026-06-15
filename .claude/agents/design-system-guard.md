@@ -25,6 +25,7 @@ Only UI / presentational changes have a design surface (QML, styling, components
 
 ## What to check (from `docs/design-system.md`)
 
+- **No dead UI** — flag any element with no current function: purposeless decoration, or placeholders/teasers for unbuilt features (empty mode rails, "coming in MVP-2" panels, process/breadcrumb steps for operations that don't exist yet) (§1). A structural container the current slice fills is fine; visible placeholder content is not.
 - **Tokens, not literals** — colors, fonts, radii, spacing, durations must come from the `Theme` singleton (§9). Flag any hard-coded hex/rgb color, pixel size, or font family.
 - **Typography** — Inter for UI text; JetBrains Mono for *all* numbers/data; section headers uppercase + letter-spaced + `fg-2` (§4).
 - **Layout grammar** — placement follows §2; right inspector section order Simplify → Preserve → Transform → Materials (§2).

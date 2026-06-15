@@ -13,6 +13,7 @@ OKLCH values below are canonical (the prototype's source of truth). QML renders 
 - **Tool-like, not consumer.** Dense, efficient, low-onboarding. No marketing chrome.
 - **Dark-neutral.** Dark blue-gray surfaces, minimal noise, so content (eventually the 3D viewport) is the focal point.
 - **Confidence-inspiring.** Every operation reports what it did to the mesh — visible stats and feedback at each step. No mystery.
+- **No dead UI.** Build only elements that have a function *today*. No purposeless decoration, and no placeholders or teasers for unbuilt features — no empty mode rails, no "coming in MVP-2" panels, no process steps for operations that don't exist yet. When a pattern in this doc lists future steps (e.g. the `IMPORT → SIMPLIFY → EXPORT` breadcrumb), render only the steps that currently exist and add the rest when they ship. A structural container the current slice will fill is fine; visible placeholder content is not.
 
 ## 2. Layout grammar
 
@@ -31,7 +32,7 @@ The app shell is a fixed frame:
 
 - **Top bar:** app identity + version pill at left, current filename + format tag centered, window controls at right.
 - **Left:** thin vertical **icon rail**, then the **Scene Outliner** panel (object list, per-row face counts, running total at top).
-- **Center stage:** the primary surface — empty-state dropzone before load, 3D viewport after (viewport is post-MVP-1; center is a placeholder until then).
+- **Center stage:** the primary surface — empty-state dropzone before a model loads, the 3D viewport once it exists (post-MVP-1). Until the viewport ships, the loaded-state center is simply an empty canvas (and a working drop target) — no placeholder teaser content (see §1, "No dead UI").
 - **Right inspector:** stacked, scrollable sections. **Canonical order: Simplify → Preserve → Transform → Materials.** (Only the in-scope sections render; absent sections simply don't appear.)
 - **Status bar:** transient state at left, **primary action button at the far right** (e.g. "Export to SketchUp").
 
@@ -84,7 +85,7 @@ Alt accent themes exist in the prototype (green hue 155, purple hue 320). Defaul
 
 - **Always show the delta.** Simplify reads `4,240 faces` with `from 16,960 original` beneath — never a bare number.
 - **Status bar narrates state:** `Awaiting import` → loaded → `Selected: <object>` → export progress.
-- **Process breadcrumb:** `IMPORT → SIMPLIFY → EXPORT`, current step highlighted (the prototype's `CLEAN` step maps to materials, post-MVP-1).
+- **Process breadcrumb:** `IMPORT → SIMPLIFY → EXPORT`, current step highlighted (the prototype's `CLEAN` step maps to materials, post-MVP-1). Render only the steps that exist today — add each step when its operation ships, never as a dead placeholder (see §1, "No dead UI").
 - **Warnings use `coral`,** inline next to the thing that's wrong (e.g. missing-texture flag on a material/empty state), never a blocking modal.
 - **Post-export summary:** output size, face count, texture count + reveal-in-explorer.
 
