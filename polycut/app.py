@@ -10,12 +10,13 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from polycut.bridge import Processor
+from polycut.resources import base_dir, ui_dir
 
-UI_DIR = Path(__file__).resolve().parent / "ui"
+UI_DIR = ui_dir()
 MAIN_QML = UI_DIR / "Polycut" / "Main.qml"
 # Dev convenience: the committed Meshy fixture powers the "Load sample" button.
-# Absent in a packaged build, where the button simply hides.
-SAMPLE_MODEL = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "meshy_sofa" / "model.obj"
+# Not bundled in a packaged build, where the button simply hides.
+SAMPLE_MODEL = base_dir() / "tests" / "fixtures" / "meshy_sofa" / "model.obj"
 
 
 def create_engine(app: QGuiApplication) -> QQmlApplicationEngine:

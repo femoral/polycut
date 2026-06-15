@@ -8,12 +8,12 @@ design system and ADRs.
 
 ## Status
 
-MVP-1 in progress (see issue #1). **Slices 1–3** are in place: open an `.obj` →
+MVP-1 in progress (see issue #1). **Slices 1–4** are in place: open an `.obj` →
 resolve its `.mtl` + texture → **simplify** (texture-preserving quadric decimation,
 default −75%, with a reduction slider + target-face input) → **scale** (multiplier +
 source/target units, baked into the geometry with the unit declared in the `.dae`) →
 "Export to SketchUp" writes a textured `.dae` with the texture copied beside it.
-Windows packaging is the remaining MVP-1 slice.
+**Windows packaging** ships a single-file `.exe` (no install) built in CI.
 
 ## Architecture
 
@@ -40,6 +40,19 @@ python -m venv .venv
 > `pymeshlab` additionally needs `libcom_err.so.2` on the library path — provide
 > it from your distro's `e2fsprogs`/`krb5` (e.g. via `LD_LIBRARY_PATH`) if the
 > FHS wrapper doesn't already.
+
+## Package (Windows)
+
+PyInstaller bundles the app — and PyMeshLab's native binaries — into one
+`.exe`, no Python install required. Cross-compiling isn't possible, so the build
+runs on a Windows runner in CI (`.github/workflows/windows-build.yml`) and
+attaches `Polycut.exe` to each run as a downloadable artifact. To build locally
+on Windows:
+
+```sh
+pip install -e ".[gui,packaging]"
+pyinstaller --noconfirm --clean polycut.spec   # → dist/Polycut.exe
+```
 
 ## License
 

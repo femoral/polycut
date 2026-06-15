@@ -1,0 +1,36 @@
+name: Windows build
+
+# PyInstaller cannot cross-compile, so the Windows .exe is built on a Windows
+# runner (issue #5). The single-file artifact is attached to each run for
+# download and manual verification on a clean Windows 10/11 machine.
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Match the PyMeshLab wheel pinned in the dev env (cp313).
+          python-version: "3.13"
+
+      - name: Install app + packaging deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[gui,packaging]"
+
+      - name: Build one-file .exe
+        run: pyinstaller --noconfirm --clean polycut.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Polycut-windows
+          path: dist/Polycut.exe
+          if-no-files-found: error
