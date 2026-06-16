@@ -351,10 +351,14 @@ class Processor(QObject):
         view.update(buffers, url)
 
     def _clamp_target(self, target: int) -> int:
-        """Keep the target within [MIN_FACES, original] — no up-sampling, no zero."""
+        """Keep the target within [floor, original] — no up-sampling, no zero. The
+        floor is MIN_FACES, but never above the model's own size: a model already
+        below MIN_FACES clamps to its face count, not up past it (which drove the
+        slider's reduction badge negative)."""
         if not self._model:
             return max(MIN_FACES, target)
-        return max(MIN_FACES, min(target, self._model.face_count))
+        floor = min(MIN_FACES, self._model.face_count)
+        return max(floor, min(target, self._model.face_count))
 
     def _simplifier_for(self, model):
         """The loaded simplifier for ``model``, parsing once and disposing the

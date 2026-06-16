@@ -43,7 +43,7 @@ def build_mesh_buffers(model) -> MeshBuffers:
     """
     geometry = model.geometry
     if isinstance(geometry, trimesh.Scene):
-        geometry = geometry.to_geometry()
+        geometry = _fuse_scene(geometry)
 
     positions = np.asarray(geometry.vertices, dtype=np.float32)
     normals = np.asarray(geometry.vertex_normals, dtype=np.float32)
@@ -71,6 +71,23 @@ def build_mesh_buffers(model) -> MeshBuffers:
         bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
         bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
     )
+
+
+def _fuse_scene(scene: "trimesh.Scene"):
+    """Fuse a multi-geometry scene into one ``Trimesh`` for the viewport.
+
+    ``Scene.to_geometry`` concatenates the parts but drops their vertex normals, so
+    accessing the fused mesh's normals would recompute them — a path that needs
+    scipy (which we don't ship) and prints a noisy fallback. Concatenation keeps
+    vertex order, so the parts already carry the right normals (read straight from
+    the OBJ); we stack them back onto the fused mesh to keep the fast, quiet path.
+    """
+    parts = list(scene.geometry.values())
+    fused = scene.to_geometry()
+    normals = np.vstack([p.vertex_normals for p in parts])
+    if len(normals) == len(fused.vertices):  # no vertices were merged on fuse
+        fused.vertex_normals = normals
+    return fused
 
 
 def _unique_edges(faces: np.ndarray) -> np.ndarray:

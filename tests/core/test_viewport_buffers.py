@@ -130,6 +130,36 @@ def test_committed_multi_object_fixture_loads_and_fuses():
     assert buffers.vertex_count == 16
 
 
+def test_scene_buffers_carry_the_parts_own_normals():
+    """Fusing a multi-geometry model carries each part's own vertex normals into
+    the buffer instead of recomputing them (the recompute path needs scipy and
+    prints a noisy fallback). Parts here carry deliberately non-geometric normals,
+    so a recompute would visibly differ from what's preserved."""
+    def quad(x, normal):
+        return trimesh.Trimesh(
+            vertices=np.array(
+                [[x, 0, 0], [x + 1, 0, 0], [x + 1, 1, 0], [x, 1, 0]], dtype=np.float64
+            ),
+            faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64),
+            vertex_normals=np.tile(normal, (4, 1)),  # not the geometric [0,0,1]
+            process=False,
+        )
+    scene = trimesh.Scene([quad(0.0, [0, 1, 0]), quad(2.0, [1, 0, 0])])
+    model = SourceModel(
+        source_path=Path("two.obj"),
+        geometry=scene,
+        face_count=4,
+        object_count=2,
+        texture_path=None,
+    )
+
+    buffers = build_mesh_buffers(model)
+    normals = _vertex_floats(buffers)[:, 3:6]
+
+    expected = np.vstack([np.tile([0, 1, 0], (4, 1)), np.tile([1, 0, 0], (4, 1))])
+    np.testing.assert_allclose(normals, expected, atol=1e-6)
+
+
 def test_buffers_report_mesh_counts(textured_model):
     """Building buffers from a loaded model reports its triangle + vertex counts."""
     buffers = build_mesh_buffers(textured_model)
