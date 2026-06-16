@@ -26,6 +26,8 @@ class MeshBuffers:
     triangle_count: int
     vertex_data: bytes
     index_data: bytes
+    line_index_data: bytes  # unique triangle edges, for the Wireframe / Edges modes
+    line_count: int
     stride: int
     bounds_min: tuple[float, float, float]
     bounds_max: tuple[float, float, float]
@@ -44,6 +46,9 @@ def build_mesh_buffers(model) -> MeshBuffers:
     indices = np.asarray(geometry.faces, dtype=np.uint32)
     index_data = np.ascontiguousarray(indices).tobytes()
 
+    edges = _unique_edges(indices)
+    line_index_data = np.ascontiguousarray(edges).tobytes()
+
     lo = positions.min(axis=0)
     hi = positions.max(axis=0)
 
@@ -52,10 +57,25 @@ def build_mesh_buffers(model) -> MeshBuffers:
         triangle_count=int(geometry.faces.shape[0]),
         vertex_data=vertex_data,
         index_data=index_data,
+        line_index_data=line_index_data,
+        line_count=int(edges.shape[0]),
         stride=interleaved.shape[1] * 4,
         bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
         bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
     )
+
+
+def _unique_edges(faces: np.ndarray) -> np.ndarray:
+    """The mesh's triangle edges as unique low→high vertex-index pairs.
+
+    Each triangle contributes its three edges; edges shared between adjacent
+    triangles are collapsed to one (so a quad's diagonal is drawn once, not twice).
+    Ordering each pair low→high makes (a,b) and (b,a) the same edge before dedup.
+    """
+    tri = faces.reshape(-1, 3)
+    edges = np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]])
+    edges = np.sort(edges, axis=1)  # canonical orientation so shared edges match
+    return np.unique(edges, axis=0).astype(np.uint32)
 
 
 def _vertex_uv(geometry, vertex_count) -> np.ndarray:

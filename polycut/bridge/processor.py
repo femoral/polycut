@@ -28,6 +28,7 @@ from polycut.core.scale import UNIT_METERS, UNIT_NAMES
 
 DEFAULT_REDUCTION = 0.25  # keep ~25% of faces — the −75% default applied on load
 MIN_FACES = 100  # floor so the slider can't collapse the mesh to nothing
+RENDER_MODES = ("shaded", "edges", "wireframe")  # viewport shading modes (#9)
 
 
 def _to_path(value: str) -> Path:
@@ -53,6 +54,7 @@ class Processor(QObject):
     statusChanged = Signal()
     scaleChanged = Signal()
     simplifyingChanged = Signal()
+    renderModeChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -74,6 +76,7 @@ class Processor(QObject):
         self._busy = False
         self._simplifying = False  # a faithful cut is in flight → on-canvas chip
         self._status = "Awaiting import"
+        self._render_mode = "shaded"  # viewport shading: shaded | edges | wireframe
         # PyMeshLab is not thread-safe — serialize decimations. _pending_target
         # holds the latest requested target; one worker drains it, coalescing
         # rapid slider releases so only the most recent target actually runs.
@@ -109,6 +112,19 @@ class Processor(QObject):
         if value != self._simplifying:
             self._simplifying = value
             self.simplifyingChanged.emit()
+
+    # ---- render mode (Shaded / Wireframe / Edges, #9) ------------------
+    def _get_render_mode(self) -> str:
+        return self._render_mode
+
+    def _set_render_mode(self, value: str) -> None:
+        if value in RENDER_MODES and value != self._render_mode:
+            self._render_mode = value
+            self.renderModeChanged.emit()
+
+    renderMode = Property(
+        str, _get_render_mode, _set_render_mode, notify=renderModeChanged
+    )
 
     def _get_status(self) -> str:
         return self._status

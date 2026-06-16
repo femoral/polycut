@@ -69,4 +69,6 @@ QtObject {
     readonly property int durStandard: 220
     // standard ease cubic-bezier(0.22, 1, 0.36, 1); trailing 1,1 is the curve endpoint
     readonly property list<real> easeStandard: [0.22, 1.0, 0.36, 1.0, 1.0, 1.0]
+    // spring cubic-bezier(0.34, 1.4, 0.64, 1) for toggles / playful affordances (§7)
+    readonly property list<real> easeSpring: [0.34, 1.4, 0.64, 1.0, 1.0, 1.0]
 }

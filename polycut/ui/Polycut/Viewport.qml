@@ -27,6 +27,30 @@ Item {
     // the draggable-divider comparison.
     property string viewMode: "split"
 
+    // Shaded · Edges · Wireframe — the render-style toggle (#9). State is owned by
+    // the bridge so QML switches rendering off it. Each side's View3D draws the
+    // mesh twice in one pass: a shaded solid (the fill) and the same vertices as a
+    // teal line set (the deduped triangle edges — MeshGeometry topology "lines").
+    // Both share the one depth buffer, so the lines depth-test against the solid:
+    // edges behind the surface are occluded instead of leaking through. Shaded =
+    // fill only; Edges = fill + lines (topology on the solid); Wireframe = lines
+    // only, the fill hidden so every edge shows (density).
+    readonly property string renderMode: processor.renderMode
+    readonly property bool showFill: renderMode !== "wireframe"  // solid drawn
+    readonly property bool showWire: renderMode !== "shaded"     // edge lines drawn
+    // The line set lies exactly on the surface, so without a depth nudge it would
+    // z-fight the fill (or be culled by the depth test). A small negative bias
+    // floats the visible edges just in front of the solid, while edges behind a
+    // nearer surface stay far enough back to remain occluded. Tunable by eye (#9).
+    readonly property real lineDepthBias: -10
+    // Sub-millimetre per-mode nudge to the camera near-plane. ProgressiveAA holds
+    // the last converged frame and only restarts on a camera change, so toggling
+    // fill / lines alone wouldn't repaint until the next orbit. Folding this into
+    // clipNear makes a mode switch count as a camera move → the viewport reflects
+    // the new mode at once. Deltas are visually nil (#9).
+    readonly property real renderModeNudge: renderMode === "edges" ? 0.0005
+        : renderMode === "wireframe" ? 0.001 : 0
+
     function _center() {
         return Qt.vector3d(
             (original.boundsMin.x + original.boundsMax.x) / 2,
@@ -44,7 +68,7 @@ Item {
         camera.z = _radius() * 3.2;  // pull back enough to hold the whole model
     }
 
-    // ---- before side (original, full-res) ------------------------------
+    // ---- before side (original, full-res): solid + edge lines ----------
     View3D {
         id: beforeView
         anchors.fill: parent
@@ -65,16 +89,25 @@ Item {
 
         Node {
             id: pivot
-            PerspectiveCamera { id: camera; z: 6; clipNear: 0.01 }
+            PerspectiveCamera { id: camera; z: 6; clipNear: 0.01 + root.renderModeNudge }
         }
 
-        Model {
-            visible: root.original && root.original.hasMesh
+        Model {  // the shaded solid; hidden in Wireframe so only the lines show
+            visible: root.original && root.original.hasMesh && root.showFill
             geometry: MeshGeometry { meshView: root.original }
             materials: PrincipledMaterial {
                 baseColor: Theme.fg1
                 baseColorMap: root.textured ? beforeTexture : null
                 roughness: 0.85
+            }
+        }
+        Model {  // edges / wireframe: same vertices, depth-tested against the solid
+            visible: root.original && root.original.hasMesh && root.showWire
+            depthBias: root.lineDepthBias
+            geometry: MeshGeometry { meshView: root.original; topology: "lines" }
+            materials: PrincipledMaterial {
+                baseColor: Theme.teal
+                lighting: PrincipledMaterial.NoLighting  // flat lines, not shaded
             }
         }
         Texture { id: beforeTexture; source: root.original ? root.original.textureUrl : "" }
@@ -91,46 +124,60 @@ Item {
         visible: root.viewMode !== "original"
         clip: true
 
-        View3D {
-            id: afterView
-            // Full-viewport size, shifted back so its projection lines up exactly
-            // with the before side — only the divider strip is revealed.
+        // Full-viewport size, shifted back so the projection lines up exactly with
+        // the before side — only the strip right of the divider is revealed. The
+        // last good result stays visible, dimmed, while the next cut runs.
+        Item {
+            id: afterStage
             width: root.width
             height: root.height
             x: -afterClip.x
-            // The last good result stays visible, dimmed, while the next cut runs.
             opacity: processor.simplifying ? 0.4 : 1.0
             Behavior on opacity { NumberAnimation { duration: Theme.durStandard } }
 
-            environment: SceneEnvironment {
-                clearColor: Theme.bg0
-                backgroundMode: SceneEnvironment.Color
-                antialiasingMode: SceneEnvironment.ProgressiveAA
-                antialiasingQuality: SceneEnvironment.High
-            }
+            View3D {
+                id: afterBase
+                anchors.fill: parent
 
-            DirectionalLight { eulerRotation: Qt.vector3d(-35, -45, 0); brightness: 1.0 }
-            DirectionalLight { eulerRotation: Qt.vector3d(25, 130, 0); brightness: 0.45 }
-
-            // Mirror the before camera's world transform — one shared viewpoint.
-            PerspectiveCamera {
-                id: afterCamera
-                position: camera.scenePosition
-                rotation: camera.sceneRotation
-                fieldOfView: camera.fieldOfView
-                clipNear: camera.clipNear
-            }
-
-            Model {
-                visible: root.afterMesh && root.afterMesh.hasMesh
-                geometry: MeshGeometry { meshView: root.afterMesh }
-                materials: PrincipledMaterial {
-                    baseColor: Theme.fg1
-                    baseColorMap: root.textured ? afterTexture : null
-                    roughness: 0.85
+                environment: SceneEnvironment {
+                    clearColor: Theme.bg0
+                    backgroundMode: SceneEnvironment.Color
+                    antialiasingMode: SceneEnvironment.ProgressiveAA
+                    antialiasingQuality: SceneEnvironment.High
                 }
+
+                DirectionalLight { eulerRotation: Qt.vector3d(-35, -45, 0); brightness: 1.0 }
+                DirectionalLight { eulerRotation: Qt.vector3d(25, 130, 0); brightness: 0.45 }
+
+                // Mirror the master camera's world transform — one shared viewpoint.
+                PerspectiveCamera {
+                    id: afterCamera
+                    position: camera.scenePosition
+                    rotation: camera.sceneRotation
+                    fieldOfView: camera.fieldOfView
+                    clipNear: camera.clipNear
+                }
+
+                Model {  // the shaded solid
+                    visible: root.afterMesh && root.afterMesh.hasMesh && root.showFill
+                    geometry: MeshGeometry { meshView: root.afterMesh }
+                    materials: PrincipledMaterial {
+                        baseColor: Theme.fg1
+                        baseColorMap: root.textured ? afterTexture : null
+                        roughness: 0.85
+                    }
+                }
+                Model {  // edges / wireframe lines, depth-tested against the solid
+                    visible: root.afterMesh && root.afterMesh.hasMesh && root.showWire
+                    depthBias: root.lineDepthBias
+                    geometry: MeshGeometry { meshView: root.afterMesh; topology: "lines" }
+                    materials: PrincipledMaterial {
+                        baseColor: Theme.teal
+                        lighting: PrincipledMaterial.NoLighting
+                    }
+                }
+                Texture { id: afterTexture; source: root.afterMesh ? root.afterMesh.textureUrl : "" }
             }
-            Texture { id: afterTexture; source: root.afterMesh ? root.afterMesh.textureUrl : "" }
         }
     }
 
@@ -265,77 +312,29 @@ Item {
         }
     }
 
+    // ---- render-style toggle: shaded · wireframe · edges (#9) ----------
+    // Top of the viewport, per the prototype: how the geometry is drawn. State
+    // lives in the bridge; this only reflects + sets it.
+    SegmentedToggle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: Theme.pad
+        z: 10
+        modes: ["shaded", "edges", "wireframe"]
+        current: root.renderMode
+        onSelected: function(mode) { processor.renderMode = mode; }
+    }
+
     // ---- whole-viewport toggle: original · split · simplified ----------
-    // One rounded pill track with a teal thumb that springs to the active
-    // segment (design-system.md §6 "Pill toggle"), not three loose buttons.
-    Rectangle {
-        id: modeToggle
+    // Bottom: which model fills the stage / the draggable comparison.
+    SegmentedToggle {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Theme.pad
         z: 10
-
-        readonly property var modes: ["original", "split", "simplified"]
-        readonly property int activeIndex: modes.indexOf(root.viewMode)
-        // Equal-width segments (sized to the widest label) so the thumb slides cleanly.
-        readonly property real segW: segMetrics.width + Theme.pad * 2
-
-        implicitHeight: Theme.rowHeight
-        implicitWidth: segW * modes.length + Theme.borderThick * 2
-        radius: height / 2
-        color: Theme.bg2
-        border.color: Theme.hairline
-        border.width: Theme.borderThin
-
-        TextMetrics {
-            id: segMetrics
-            font.family: Theme.fontUi
-            font.pixelSize: Theme.fontSmall
-            text: "simplified"
-        }
-
-        Rectangle {  // the active-segment thumb
-            width: modeToggle.segW
-            height: parent.height - Theme.borderThick * 2
-            y: Theme.borderThick
-            x: Theme.borderThick + modeToggle.activeIndex * modeToggle.segW
-            radius: height / 2
-            color: Theme.teal
-            Behavior on x {
-                NumberAnimation {  // spring ease — playful affordance (§5)
-                    duration: Theme.durStandard
-                    easing.type: Easing.BezierSpline
-                    easing.bezierCurve: [0.34, 1.4, 0.64, 1.0, 1.0, 1.0]
-                }
-            }
-        }
-
-        Row {
-            x: Theme.borderThick
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 0
-            Repeater {
-                model: modeToggle.modes
-                delegate: Item {
-                    required property string modelData
-                    readonly property bool active: root.viewMode === modelData
-                    width: modeToggle.segW
-                    height: modeToggle.height
-                    Text {
-                        anchors.centerIn: parent
-                        text: modelData
-                        color: parent.active ? Theme.bg0 : Theme.fg1
-                        font.family: Theme.fontUi
-                        font.pixelSize: Theme.fontSmall
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: root.viewMode = modelData
-                    }
-                }
-            }
-        }
+        modes: ["original", "split", "simplified"]
+        current: root.viewMode
+        onSelected: function(mode) { root.viewMode = mode; }
     }
 
     // Re-frame the camera each time a new original (model) arrives.

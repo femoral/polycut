@@ -30,10 +30,12 @@ _UV_OFFSET = 24
 @QmlElement
 class MeshGeometry(QQuick3DGeometry):
     meshViewChanged = Signal()
+    topologyChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._mesh_view = None
+        self._topology = "triangles"  # "triangles" (solid) | "lines" (wire / edges)
 
     def _get_mesh_view(self) -> QObject:
         return self._mesh_view
@@ -53,21 +55,43 @@ class MeshGeometry(QQuick3DGeometry):
         QObject, _get_mesh_view, _set_mesh_view, notify=meshViewChanged
     )
 
+    def _get_topology(self) -> str:
+        return self._topology
+
+    def _set_topology(self, value: str) -> None:
+        if value not in ("triangles", "lines") or value == self._topology:
+            return
+        self._topology = value
+        self.topologyChanged.emit()
+        self._rebuild()  # swap the index buffer + primitive type
+
+    topology = Property(str, _get_topology, _set_topology, notify=topologyChanged)
+
     def _rebuild(self) -> None:
-        """Re-upload the current mesh's buffers + attribute layout to the GPU."""
+        """Re-upload the current mesh's buffers + attribute layout to the GPU.
+
+        Both topologies share the same vertex buffer (positions/normals/UVs); only
+        the index buffer and primitive type differ — so the line ('edges'/wireframe)
+        pass draws the exact same vertices as the solid and depth-tests against it.
+        """
         self.clear()
         view = self._mesh_view
         if view is None or not view.hasMesh:
             self.update()
             return
 
+        lines = self._topology == "lines"
         self.setStride(view.stride)
         self.setVertexData(view.vertexData())
-        self.setIndexData(view.indexData())
+        self.setIndexData(view.lineIndexData() if lines else view.indexData())
         self.addAttribute(_Semantic.PositionSemantic, _POSITION_OFFSET, _F32)
         self.addAttribute(_Semantic.NormalSemantic, _NORMAL_OFFSET, _F32)
         self.addAttribute(_Semantic.TexCoordSemantic, _UV_OFFSET, _F32)
         self.addAttribute(_Semantic.IndexSemantic, 0, _U32)
-        self.setPrimitiveType(QQuick3DGeometry.PrimitiveType.Triangles)
+        self.setPrimitiveType(
+            QQuick3DGeometry.PrimitiveType.Lines
+            if lines
+            else QQuick3DGeometry.PrimitiveType.Triangles
+        )
         self.setBounds(view.boundsMin, view.boundsMax)
         self.update()

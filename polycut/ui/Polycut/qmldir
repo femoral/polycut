@@ -7,4 +7,5 @@ TransformPanel TransformPanel.qml
 UnitSelect UnitSelect.qml
 EmptyState EmptyState.qml
 Toast Toast.qml
+SegmentedToggle SegmentedToggle.qml
 Viewport Viewport.qml

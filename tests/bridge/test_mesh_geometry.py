@@ -82,3 +82,22 @@ def test_geometry_re_uploads_when_the_mesh_changes(qapp, quad_view):
 
     assert bytes(geometry.indexData()) != before
     assert bytes(geometry.indexData()) == bytes(quad_view.indexData())
+
+
+def test_lines_topology_uploads_edges_as_a_line_primitive(qapp, quad_view):
+    """In 'lines' topology the geometry draws the deduped triangle edges as a line
+    primitive (the Wireframe / Edges modes), sharing the solid's vertex buffer so
+    it can be depth-tested against the fill in the same pass."""
+    from PySide6.QtQuick3D import QQuick3DGeometry
+
+    solid = MeshGeometry()
+    solid.meshView = quad_view
+    assert solid.primitiveType() == QQuick3DGeometry.PrimitiveType.Triangles
+    assert bytes(solid.indexData()) == bytes(quad_view.indexData())
+
+    lines = MeshGeometry()
+    lines.meshView = quad_view
+    lines.topology = "lines"
+    assert lines.primitiveType() == QQuick3DGeometry.PrimitiveType.Lines
+    assert bytes(lines.indexData()) == bytes(quad_view.lineIndexData())
+    assert bytes(lines.vertexData()) == bytes(quad_view.vertexData())  # shared verts

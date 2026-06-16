@@ -71,3 +71,10 @@ class MeshView(QObject):
     def indexData(self) -> QByteArray:
         """The triangle index buffer the geometry uploads (empty when none)."""
         return QByteArray(self._buffers.index_data) if self._buffers else QByteArray()
+
+    @Slot(result=QByteArray)
+    def lineIndexData(self) -> QByteArray:
+        """The unique-edge index buffer for the Wireframe / Edges line pass."""
+        return (
+            QByteArray(self._buffers.line_index_data) if self._buffers else QByteArray()
+        )

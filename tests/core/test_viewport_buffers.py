@@ -117,6 +117,22 @@ def test_vertex_buffer_carries_normals(textured_model):
     )
 
 
+def test_line_indices_are_the_unique_triangle_edges(textured_model):
+    """The Wireframe / Edges modes draw the mesh as lines: the buffer holds each
+    triangle edge once (shared edges deduped), so a 2-triangle quad — which shares
+    one diagonal — yields 5 edges, not 6. Drawn in the same pass as the solid so
+    hidden edges are depth-occluded (#9)."""
+    buffers = build_mesh_buffers(textured_model)
+
+    pairs = np.frombuffer(buffers.line_index_data, dtype=np.uint32).reshape(-1, 2)
+
+    assert buffers.line_count == 5  # 4 perimeter + 1 shared diagonal, deduped
+    assert pairs.shape == (5, 2)
+    assert pairs.max() < buffers.vertex_count
+    assert (pairs[:, 0] < pairs[:, 1]).all()  # each edge stored low→high
+    assert len({tuple(p) for p in pairs}) == 5  # no duplicates
+
+
 def test_vertex_buffer_carries_uvs(textured_model):
     """Each vertex carries its UV (floats 6..8) so the baked texture maps on."""
     buffers = build_mesh_buffers(textured_model)
