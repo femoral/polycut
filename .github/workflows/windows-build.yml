@@ -6,9 +6,7 @@ name: Windows build
 # verification on a clean Windows 10/11 machine.
 
 on:
-  push:
-    branches: [master]
-  workflow_dispatch:
+  workflow_dispatch:  # manual-only — run from the Actions tab when a build is wanted
 
 jobs:
   build:
