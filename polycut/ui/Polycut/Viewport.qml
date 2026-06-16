@@ -66,6 +66,17 @@ Item {
     // the new mode at once. Deltas are visually nil (#9).
     readonly property real renderModeNudge: renderMode === "edges" ? 0.0005
         : renderMode === "wireframe" ? 0.001 : 0
+    // The same ProgressiveAA hold bites a fresh cut: the simplified geometry
+    // re-uploads (MeshGeometry.update marks the node dirty), but re-decimating at a
+    // new target or flipping a Preserve toggle isn't a camera change, so the after
+    // side keeps its last converged frame until the next orbit. A projection tweak
+    // (clipNear/FOV) doesn't reset the accumulator — only a real camera *transform*
+    // change does — so on each cut we shift the camera sideways by a scene-scaled
+    // epsilon (~0.05% of the model radius: sub-pixel on screen, but a genuine
+    // world-transform delta the after camera mirrors). That restarts both views'
+    // AA so the preview reflects the cut at once, without disturbing the orbit. The
+    // value alternates back toward zero so it never drifts. (#13 HITL)
+    property real cutNudge: 0
 
     // Outliner selection is reflected in the left panel (row accent) and the status
     // bar — not in the 3D view. A whole-mesh tint can't isolate one object in the
@@ -117,7 +128,14 @@ Item {
 
         Node {
             id: pivot
-            PerspectiveCamera { id: camera; z: 6; clipNear: 0.01 + root.renderModeNudge }
+            Node {
+                // A fixed camera dolly the OrbitCameraController never writes to (it
+                // owns `camera`'s own position/rotation). Shifting this by a sub-pixel
+                // epsilon on each cut (cutNudge) moves the camera in world space —
+                // restarting ProgressiveAA — without the orbit clobbering the nudge.
+                x: root.cutNudge
+                PerspectiveCamera { id: camera; z: 6; clipNear: 0.01 + root.renderModeNudge }
+            }
         }
 
         Node {  // model node — render-time up-axis rotation (#12), shared by both passes
@@ -386,5 +404,16 @@ Item {
     Connections {
         target: processor
         function onUpAxisChanged() { root._resetView(); }
+    }
+
+    // Force the after side to repaint when a fresh cut swaps in: shift the camera by
+    // a scene-scaled epsilon so ProgressiveAA restarts (see cutNudge). Without this
+    // the new geometry — from a slider re-cut or a Preserve toggle — wouldn't show
+    // until the next orbit. Alternates back toward zero so the camera never drifts.
+    Connections {
+        target: processor.simplifiedMesh
+        function onChanged() {
+            root.cutNudge = root.cutNudge !== 0 ? 0 : root._radius() * 0.0005;
+        }
     }
 }
