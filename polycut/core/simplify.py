@@ -15,17 +15,47 @@ Collada export already consumes.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import trimesh
 
 from polycut.core.model import SourceModel
 
 
-def simplify_model(model: SourceModel, target_faces: int) -> SourceModel:
+@dataclass(frozen=True)
+class PreserveOptions:
+    """The four Preserve toggles that steer the texture-preserving collapse (#13).
+
+    Each maps to one parameter of PyMeshLab's quadric-edge-collapse-with-texture
+    filter. The defaults reproduce the collapse's long-standing hardcoded
+    behaviour — UV seams, normals and the open boundary all kept, hard-edge
+    (planar) constraints off — so an un-toggled cut is unchanged:
+
+    * ``uv_seams`` → ``extratcoordw`` (texture-coordinate weight: full vs none),
+      so UV/texture seams steer the collapse instead of being smeared.
+    * ``normals`` → ``preservenormal``: avoid face flips, keep surface orientation.
+    * ``boundary`` → ``preserveboundary``: keep the silhouette / open-edge loop.
+    * ``hard_edges`` → ``planarquadric``: planar-simplification constraints that
+      hold the sharp creases between flat regions.
+    """
+
+    uv_seams: bool = True
+    normals: bool = True
+    boundary: bool = True
+    hard_edges: bool = False
+
+
+def simplify_model(
+    model: SourceModel,
+    target_faces: int,
+    preserve: PreserveOptions = PreserveOptions(),
+) -> SourceModel:
     """Decimate ``model`` toward ``target_faces`` while preserving its texture.
 
     Returns a new :class:`SourceModel` whose geometry carries the reduced mesh
     with intact UVs; ``texture_path`` is carried over unchanged so the export
-    copies the same baked texture beside the output.
+    copies the same baked texture beside the output. ``preserve`` selects which
+    attributes the collapse holds onto (#13).
 
     Stateless: parses the ``.obj`` from disk every call. For repeated cuts of the
     same model (the slider settling on target after target) use
@@ -35,7 +65,7 @@ def simplify_model(model: SourceModel, target_faces: int) -> SourceModel:
 
     ms = pymeshlab.MeshSet()
     ms.load_new_mesh(str(model.source_path))
-    return _collapse_current(ms, target_faces, model)
+    return _collapse_current(ms, target_faces, model, preserve)
 
 
 class ModelSimplifier:
@@ -59,12 +89,18 @@ class ModelSimplifier:
         self._ms.load_new_mesh(str(model.source_path))  # the one and only parse
         self._original_id = self._ms.current_mesh_id()
 
-    def simplify(self, target_faces: int) -> SourceModel:
+    def simplify(
+        self,
+        target_faces: int,
+        preserve: PreserveOptions = PreserveOptions(),
+    ) -> SourceModel:
         """Re-cut the in-memory original toward ``target_faces``.
 
-        Decimation is destructive, so each call works on a throwaway copy of the
-        pristine original and discards it afterwards — keeping memory bounded to
-        the original plus one transient cut.
+        ``preserve`` selects which attributes the collapse holds onto (#13); since
+        each cut restarts from the pristine original, the flags apply per call with
+        no re-parse. Decimation is destructive, so each call works on a throwaway
+        copy of the pristine original and discards it afterwards — keeping memory
+        bounded to the original plus one transient cut.
         """
         if self._ms is None:
             raise RuntimeError("ModelSimplifier is closed")
@@ -73,7 +109,7 @@ class ModelSimplifier:
         self._ms.generate_copy_of_current_mesh()  # copy becomes the current mesh
         working_id = self._ms.current_mesh_id()
         try:
-            return _collapse_current(self._ms, target_faces, self._model)
+            return _collapse_current(self._ms, target_faces, self._model, preserve)
         finally:
             self._ms.set_current_mesh(working_id)
             self._ms.delete_current_mesh()  # drop the copy; original stays pristine
@@ -89,12 +125,19 @@ class ModelSimplifier:
         self.close()
 
 
-def _collapse_current(ms, target_faces: int, model: SourceModel) -> SourceModel:
+def _collapse_current(
+    ms,
+    target_faces: int,
+    model: SourceModel,
+    preserve: PreserveOptions = PreserveOptions(),
+) -> SourceModel:
     """Run the texture-preserving collapse on ``ms``'s current mesh and extract it."""
     ms.meshing_decimation_quadric_edge_collapse_with_texture(
         targetfacenum=int(target_faces),
-        preserveboundary=True,  # keep silhouette edges so the outline still reads
-        preservenormal=True,
+        preserveboundary=preserve.boundary,  # keep the silhouette / open-edge loop
+        preservenormal=preserve.normals,
+        extratcoordw=1.0 if preserve.uv_seams else 0.0,  # UV/texture-seam weight
+        planarquadric=preserve.hard_edges,  # hold sharp creases between flat regions
         optimalplacement=True,
     )
     ms.compute_texcoord_transfer_wedge_to_vertex()

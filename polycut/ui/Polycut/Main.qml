@@ -317,6 +317,12 @@ ApplicationWindow {
                             Layout.fillWidth: true
                         }
 
+                        // Preserve — pill toggles steering what the collapse keeps.
+                        PreservePanel {
+                            visible: processor.hasModel
+                            Layout.fillWidth: true
+                        }
+
                         // Transform — scale multiplier + source/target units.
                         TransformPanel {
                             visible: processor.hasModel

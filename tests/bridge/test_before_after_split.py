@@ -70,7 +70,7 @@ class _GatedSimplifier:
         self._result = result
         self._gate = gate
 
-    def simplify(self, target_faces):
+    def simplify(self, target_faces, preserve=None):
         self._gate.wait(timeout=5.0)
         return self._result
 

@@ -44,7 +44,7 @@ class _FakeSimplifier:
     def __init__(self, model):
         self.model = model
 
-    def simplify(self, target_faces):
+    def simplify(self, target_faces, preserve=None):
         return self.model
 
     def close(self):

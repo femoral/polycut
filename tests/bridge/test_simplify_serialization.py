@@ -34,7 +34,7 @@ def test_simplify_requests_never_overlap(monkeypatch):
         def __init__(self, model):
             self.model = model
 
-        def simplify(self, target_faces):
+        def simplify(self, target_faces, preserve=None):
             with guard:
                 live["now"] += 1
                 live["peak"] = max(live["peak"], live["now"])

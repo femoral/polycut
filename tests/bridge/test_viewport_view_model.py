@@ -66,7 +66,7 @@ class _FakeSimplifier:
         self.model = model
         self._results = list(results)
 
-    def simplify(self, target_faces):
+    def simplify(self, target_faces, preserve=None):
         result = self._results[0] if len(self._results) == 1 else self._results.pop(0)
         return result
 

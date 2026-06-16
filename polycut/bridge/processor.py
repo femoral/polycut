@@ -11,6 +11,7 @@ from __future__ import annotations
 import platform
 import subprocess
 import threading
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
@@ -19,6 +20,7 @@ from polycut.bridge.mesh_view import MeshView
 from polycut.core import (
     UP_AXES,
     ModelSimplifier,
+    PreserveOptions,
     build_mesh_buffers,
     export_collada,
     load_source_model,
@@ -59,6 +61,7 @@ class Processor(QObject):
     renderModeChanged = Signal()
     selectionChanged = Signal()
     upAxisChanged = Signal()
+    preserveChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -97,6 +100,11 @@ class Processor(QObject):
         # instant render-time rotation of the scene node (QML), so toggling never
         # rebuilds the heavy buffers and the before/after split stays in lockstep.
         self._up_axis = "y"
+        # preserve toggles — which attributes the collapse holds onto (#13). The
+        # worker reads these fresh at cut time, so flipping one and re-running the
+        # cut (see the setters) reflects it in the before/after preview. Defaults
+        # reproduce the collapse's prior hardcoded behaviour (ADR-0002/0003).
+        self._preserve = PreserveOptions()
 
     def _current(self):
         """The model the UI reflects and export writes: simplified if present."""
@@ -320,7 +328,9 @@ class Processor(QObject):
                     return
 
             try:
-                simplified = self._simplifier_for(self._model).simplify(target)
+                simplified = self._simplifier_for(self._model).simplify(
+                    target, self._preserve  # the flags as of this cut
+                )
             except Exception as exc:
                 self._dispose_simplifier()
                 with self._simplify_guard:
@@ -445,6 +455,58 @@ class Processor(QObject):
             self.scaleChanged.emit()  # the size readout follows the new orientation
 
     upAxis = Property(str, _get_up_axis, _set_up_axis, notify=upAxisChanged)
+
+    # ---- preserve toggles (UV seams / Normals / Boundary / Hard edges, #13) ----
+    def _set_preserve(self, **change) -> None:
+        """Update one preserve flag and re-cut so the preview reflects it. A no-op
+        when the value is unchanged — no needless signal churn or re-decimation."""
+        updated = replace(self._preserve, **change)
+        if updated == self._preserve:
+            return
+        self._preserve = updated
+        self.preserveChanged.emit()
+        if self._model is not None:
+            self.simplify(self._target)  # re-run the cut with the new flags
+
+    def _get_preserve_uv_seams(self) -> bool:
+        return self._preserve.uv_seams
+
+    def _set_preserve_uv_seams(self, value: bool) -> None:
+        self._set_preserve(uv_seams=bool(value))
+
+    preserveUvSeams = Property(
+        bool, _get_preserve_uv_seams, _set_preserve_uv_seams, notify=preserveChanged
+    )
+
+    def _get_preserve_normals(self) -> bool:
+        return self._preserve.normals
+
+    def _set_preserve_normals(self, value: bool) -> None:
+        self._set_preserve(normals=bool(value))
+
+    preserveNormals = Property(
+        bool, _get_preserve_normals, _set_preserve_normals, notify=preserveChanged
+    )
+
+    def _get_preserve_boundary(self) -> bool:
+        return self._preserve.boundary
+
+    def _set_preserve_boundary(self, value: bool) -> None:
+        self._set_preserve(boundary=bool(value))
+
+    preserveBoundary = Property(
+        bool, _get_preserve_boundary, _set_preserve_boundary, notify=preserveChanged
+    )
+
+    def _get_preserve_hard_edges(self) -> bool:
+        return self._preserve.hard_edges
+
+    def _set_preserve_hard_edges(self, value: bool) -> None:
+        self._set_preserve(hard_edges=bool(value))
+
+    preserveHardEdges = Property(
+        bool, _get_preserve_hard_edges, _set_preserve_hard_edges, notify=preserveChanged
+    )
 
     def _get_scaled_dimensions(self) -> str:
         """The model's resulting real-world size in the target unit — the §7 delta."""

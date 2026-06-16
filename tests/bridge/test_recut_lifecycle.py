@@ -28,7 +28,7 @@ class FakeSimplifier:
         self.closed = False
         FakeSimplifier.instances.append(self)
 
-    def simplify(self, target_faces):
+    def simplify(self, target_faces, preserve=None):
         self.cuts.append(target_faces)
         return SimpleNamespace(
             face_count=target_faces, has_texture=False, texture_path=None
