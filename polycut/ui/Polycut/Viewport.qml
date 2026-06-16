@@ -39,7 +39,11 @@ Item {
         environment: SceneEnvironment {
             clearColor: Theme.bg0  // the dark-neutral stage — content is the focus
             backgroundMode: SceneEnvironment.Color
-            antialiasingMode: SceneEnvironment.MSAA
+            // ProgressiveAA, not MSAA: render one sample while the camera moves
+            // (cheap — keeps orbit/zoom at full frame rate) and accumulate to a
+            // crisp image once it settles. MSAA paid its full multisample cost
+            // every frame, which was fill-rate-bound and dropped FPS on orbit.
+            antialiasingMode: SceneEnvironment.ProgressiveAA
             antialiasingQuality: SceneEnvironment.High
         }
 
