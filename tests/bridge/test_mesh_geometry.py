@@ -1,7 +1,7 @@
 """The QtQuick3D geometry the viewport draws, fed from the bridge view-model (#8).
 
 ``MeshGeometry`` is a ``QQuick3DGeometry`` the QML ``Model`` uses for its mesh.
-It binds to ``processor.meshData`` and, whenever that changes, re-uploads the
+It binds to ``processor.simplifiedMesh`` and, whenever that changes, re-uploads the
 interleaved vertex buffer + index buffer with the position/normal/UV attribute
 layout the core builder emits. Constructing it headless (no window) lets us pin
 that GPU configuration here; the shaded pixels themselves are HITL (#15).

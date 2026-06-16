@@ -1,7 +1,7 @@
 """The QtQuick3D geometry node the viewport renders (#8).
 
 A ``QQuick3DGeometry`` that mirrors the bridge's :class:`MeshView`: it binds to
-``processor.meshData`` and, on every change, re-uploads the interleaved vertex
+``processor.simplifiedMesh`` and, on every change, re-uploads the interleaved vertex
 buffer + triangle index buffer with the fixed position/normal/UV attribute
 layout :func:`polycut.core.build_mesh_buffers` emits. Registered as a QML type so
 ``Viewport.qml`` can hand it to a ``Model``. No geometry maths lives here — only

@@ -52,15 +52,19 @@ class Processor(QObject):
     busyChanged = Signal()
     statusChanged = Signal()
     scaleChanged = Signal()
+    simplifyingChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._model = None  # the loaded original (source for re-simplify)
         self._simplified = None  # current decimated model; what export writes
         self._target = 0  # requested target face count
-        # The mesh + texture the Qt3D viewport draws — refreshed off-thread with
-        # the current geometry's render buffers each time a cut settles (#8).
-        self._mesh_view = MeshView(self)
+        # The two mesh views the before/after split draws (#10): the original is
+        # fed once on load and renders immediately; the simplified is refreshed
+        # off-thread each time a cut settles. Render is decoupled from the cut
+        # (ADR-0003) — the viewport never blocks on the CPU collapse.
+        self._original_mesh = MeshView(self)
+        self._simplified_mesh = MeshView(self)
         # The OBJ parsed into PyMeshLab once per model; re-cut from memory on each
         # settle (#18). Built + disposed only on the serialized simplify worker, so
         # PyMeshLab is never touched from two threads. _simplifier_model records
@@ -68,6 +72,7 @@ class Processor(QObject):
         self._simplifier = None
         self._simplifier_model = None
         self._busy = False
+        self._simplifying = False  # a faithful cut is in flight → on-canvas chip
         self._status = "Awaiting import"
         # PyMeshLab is not thread-safe — serialize decimations. _pending_target
         # holds the latest requested target; one worker drains it, coalescing
@@ -95,6 +100,16 @@ class Processor(QObject):
             self._busy = value
             self.busyChanged.emit()
 
+    def _get_simplifying(self) -> bool:
+        return self._simplifying
+
+    simplifying = Property(bool, _get_simplifying, notify=simplifyingChanged)
+
+    def _set_simplifying(self, value: bool) -> None:
+        if value != self._simplifying:
+            self._simplifying = value
+            self.simplifyingChanged.emit()
+
     def _get_status(self) -> str:
         return self._status
 
@@ -111,11 +126,17 @@ class Processor(QObject):
 
     hasModel = Property(bool, _get_has_model, notify=statsChanged)
 
-    def _get_mesh_data(self) -> MeshView:
-        """The current mesh + texture the viewport renders (#8)."""
-        return self._mesh_view
+    def _get_original_mesh(self) -> MeshView:
+        """The original full-res mesh — fed on load, the before side (#10)."""
+        return self._original_mesh
 
-    meshData = Property(QObject, _get_mesh_data, constant=True)
+    originalMesh = Property(QObject, _get_original_mesh, constant=True)
+
+    def _get_simplified_mesh(self) -> MeshView:
+        """The simplified (after) side — the exact mesh the exporter writes (#10)."""
+        return self._simplified_mesh
+
+    simplifiedMesh = Property(QObject, _get_simplified_mesh, constant=True)
 
     def _get_file_name(self) -> str:
         return self._model.source_path.name if self._model else ""
@@ -189,6 +210,7 @@ class Processor(QObject):
             return
         self._model = model
         self._simplified = None  # show the original until the default reduction lands
+        self._feed_mesh_view(self._original_mesh, model)  # original renders at once
         self._target = self._clamp_target(round(model.face_count * DEFAULT_REDUCTION))
         self._set_busy(False)
         self._set_status(f"Loaded {source.name}")
@@ -205,6 +227,7 @@ class Processor(QObject):
         self._target = self._clamp_target(int(target_faces))
         self._set_status("Simplifying…")
         self._set_busy(True)
+        self._set_simplifying(True)  # after-side dims + shows the teal chip
         self.statsChanged.emit()  # reflect the new target on the input immediately
         with self._simplify_guard:
             self._pending_target = self._target
@@ -231,6 +254,7 @@ class Processor(QObject):
                     self._simplify_active = False
                     self._pending_target = None
                 self._set_busy(False)
+                self._set_simplifying(False)
                 self._set_status("Simplify failed")
                 self.simplifyFailed.emit(str(exc))
                 return
@@ -242,6 +266,7 @@ class Processor(QObject):
                 self._simplify_active = False
             self._refresh_mesh_view(simplified)  # feed the viewport off-thread
             self._set_busy(False)
+            self._set_simplifying(False)  # fresh mesh swapped in — chip clears
             self._set_status(f"Simplified to {simplified.face_count:,} faces")
             self.statsChanged.emit()
             self.scaleChanged.emit()  # the size readout follows the new geometry
@@ -249,12 +274,16 @@ class Processor(QObject):
             return
 
     def _refresh_mesh_view(self, model) -> None:
-        """Rebuild the viewport's buffers from ``model`` and hand them to QML.
+        """Feed the simplified (after) side with ``model``'s render buffers."""
+        self._feed_mesh_view(self._simplified_mesh, model)
 
-        Runs on the simplify worker, so the (numpy) interleave never hitches the
-        GUI thread. The texture follows the model — empty URL when none was found.
-        The viewport is a non-critical projection: if building its buffers fails,
-        the prior mesh stays on screen and the load → export flow is untouched.
+    def _feed_mesh_view(self, view, model) -> None:
+        """Rebuild ``model``'s render buffers and hand them to ``view``.
+
+        Runs off the GUI thread, so the (numpy) interleave never hitches it. The
+        texture follows the model — empty URL when none was found. The viewport is
+        a non-critical projection: if building its buffers fails, the prior mesh
+        stays on screen and the load → export flow is untouched.
         """
         try:
             buffers = build_mesh_buffers(model)
@@ -262,7 +291,7 @@ class Processor(QObject):
             return
         texture = model.texture_path
         url = QUrl.fromLocalFile(str(texture)) if texture else QUrl()
-        self._mesh_view.update(buffers, url)
+        view.update(buffers, url)
 
     def _clamp_target(self, target: int) -> int:
         """Keep the target within [MIN_FACES, original] — no up-sampling, no zero."""

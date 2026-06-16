@@ -60,7 +60,7 @@ def _triangle_model(path):
 
 
 class _FakeSimplifier:
-    """Returns pre-canned real meshes per cut so meshData has geometry to expose."""
+    """Returns pre-canned real meshes per cut so the after-side has geometry to expose."""
 
     def __init__(self, model, results):
         self.model = model
@@ -81,7 +81,7 @@ def _wait_settled(proc, timeout=5.0):
 
 
 def test_mesh_data_exposes_loaded_geometry_and_texture(monkeypatch):
-    """After a load, meshData carries the rendered mesh's counts + its texture."""
+    """After a load, simplifiedMesh carries the rendered mesh's counts + its texture."""
     quad = _quad_model("a.obj", texture="baked.png")
     monkeypatch.setattr(processor_module, "load_source_model", lambda p: quad)
     monkeypatch.setattr(
@@ -92,7 +92,7 @@ def test_mesh_data_exposes_loaded_geometry_and_texture(monkeypatch):
     proc.loadFile("a.obj")
     _wait_settled(proc)
 
-    mesh = proc.meshData
+    mesh = proc.simplifiedMesh
     assert mesh.hasMesh is True
     assert mesh.triangleCount == 2
     assert mesh.vertexCount == 4
@@ -100,7 +100,7 @@ def test_mesh_data_exposes_loaded_geometry_and_texture(monkeypatch):
 
 
 def test_mesh_data_tracks_the_latest_cut(monkeypatch):
-    """meshData reflects the current cut, not the original or a stale one."""
+    """simplifiedMesh reflects the current cut, not the original or a stale one."""
     quad = _quad_model("a.obj")
     triangle = _triangle_model("a.obj")
     monkeypatch.setattr(processor_module, "load_source_model", lambda p: quad)
@@ -113,15 +113,15 @@ def test_mesh_data_tracks_the_latest_cut(monkeypatch):
     proc = Processor()
     proc.loadFile("a.obj")  # default reduction → quad (2 triangles)
     _wait_settled(proc)
-    assert proc.meshData.triangleCount == 2
+    assert proc.simplifiedMesh.triangleCount == 2
 
     proc.simplify(1)  # a more aggressive cut → triangle (1 triangle)
     deadline = time.time() + 5.0
     while proc.busy and time.time() < deadline:
         time.sleep(0.005)
 
-    assert proc.meshData.triangleCount == 1
-    assert proc.meshData.vertexCount == 3
+    assert proc.simplifiedMesh.triangleCount == 1
+    assert proc.simplifiedMesh.vertexCount == 3
 
 
 def test_mesh_data_exposes_raw_buffers_for_the_geometry(monkeypatch):
@@ -136,7 +136,7 @@ def test_mesh_data_exposes_raw_buffers_for_the_geometry(monkeypatch):
     proc.loadFile("a.obj")
     _wait_settled(proc)
 
-    mesh = proc.meshData
+    mesh = proc.simplifiedMesh
     expected = build_mesh_buffers(quad)
     assert bytes(mesh.vertexData()) == expected.vertex_data
     assert bytes(mesh.indexData()) == expected.index_data
