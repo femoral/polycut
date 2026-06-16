@@ -80,6 +80,24 @@ def test_detect_reads_the_meshy_sofa_as_meters(sofa_model):
     assert detect_source_unit(sofa_model) == "m"
 
 
+def test_scale_uses_the_meshs_cached_normals_not_a_recompute():
+    """Scaling must read the loaded mesh's own (cached) normals, not recompute them
+    from a fresh copy — a recompute on the 646k sofa is a multi-second scipy-fallback
+    grind at export. A uniform scale leaves normals untouched, so a deliberately
+    non-geometric cached normal (+X on an XY quad) must survive verbatim."""
+    quad = trimesh.Trimesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64),
+        vertex_normals=np.tile([1.0, 0.0, 0.0], (4, 1)),  # bogus: +X, not the +Z face normal
+        process=False,
+    )
+    model = SourceModel(Path("quad.obj"), quad, 2, 1, None)
+
+    scaled = scale_geometry(model, 2.0)
+
+    assert np.allclose(scaled.geometry.vertex_normals, [1.0, 0.0, 0.0])
+
+
 def test_scaled_export_declares_target_unit(box_model, tmp_path):
     """The exported .dae declares the target unit so SketchUp sizes it right."""
     scaled = scale_geometry(box_model, scale_factor(1.0, "m", "cm"))  # ×100

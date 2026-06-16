@@ -73,10 +73,11 @@ def test_up_axis_defaults_to_y():
 
 
 def test_setting_a_valid_up_axis_transitions_and_notifies():
-    """Choosing X / Z lands on the property and emits so QML + the readout refresh."""
+    """Choosing X / Z lands on the property and emits upAxisChanged so the viewport
+    re-rotates + reframes (the rotation itself is a render-time transform — HITL)."""
     proc = Processor()
     emits = []
-    proc.scaleChanged.connect(lambda: emits.append(proc.upAxis))
+    proc.upAxisChanged.connect(lambda: emits.append(proc.upAxis))
 
     proc.upAxis = "z"
 
@@ -88,30 +89,12 @@ def test_an_unknown_up_axis_is_rejected():
     """Only X / Y / Z are valid — a stray value leaves the orientation put."""
     proc = Processor()
     emits = []
-    proc.scaleChanged.connect(lambda: emits.append(proc.upAxis))
+    proc.upAxisChanged.connect(lambda: emits.append(proc.upAxis))
 
     proc.upAxis = "w"
 
     assert proc.upAxis == "y"
     assert emits == []
-
-
-def test_changing_up_axis_rotates_the_rendered_geometry(monkeypatch):
-    """The viewport reflects the up-axis: the rendered mesh's bounds rotate when the
-    axis changes (AC#1) — Z-up swaps the model's Y and Z extents."""
-    model = _box_model("couch.obj", extents=(1.0, 2.0, 3.0))  # Y extent 2, Z extent 3
-    _install(monkeypatch, model)
-
-    proc = Processor()
-    _load(proc)
-    assert proc.originalMesh.boundsMax.y() == 1.0  # half of the Y extent (2)
-
-    proc.upAxis = "z"  # +Z → +Y: the Z extent (3) becomes the Y extent
-
-    deadline = time.time() + 5.0
-    while abs(proc.originalMesh.boundsMax.y() - 1.5) > 1e-4 and time.time() < deadline:
-        time.sleep(0.005)
-    assert proc.originalMesh.boundsMax.y() == 1.5  # half of the old Z extent (3)
 
 
 def test_loading_auto_fills_the_detected_source_unit(monkeypatch):

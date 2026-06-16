@@ -81,6 +81,25 @@ def test_remap_rotates_the_cached_normals():
     assert np.allclose(result.geometry.vertex_normals, [0.0, 1.0, 0.0])  # +Z → +Y
 
 
+def test_remap_uses_the_meshs_cached_normals_not_a_recompute():
+    """Remap must read the loaded mesh's own (cached) normals, never recompute them
+    from a fresh copy — a recompute on the 646k sofa drops to a multi-second scipy
+    fallback on every toggle. Pinned with a deliberately non-geometric cached
+    normal (+X on an XY quad): rotating about X leaves +X put, so it survives only
+    if the cached value is used; a recompute would yield the geometric normal."""
+    quad = trimesh.Trimesh(
+        vertices=np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], dtype=float),
+        faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64),
+        vertex_normals=np.tile([1.0, 0.0, 0.0], (4, 1)),  # bogus: +X, not the +Z face normal
+        process=False,
+    )
+    model = SourceModel(Path("quad.obj"), quad, 2, 1, None)
+
+    result = remap_up_axis(model, "z")  # rotate −90° about X — leaves +X unchanged
+
+    assert np.allclose(result.geometry.vertex_normals, [1.0, 0.0, 0.0])
+
+
 def test_remap_keeps_topology_and_metadata():
     """Rotating only moves vertices — face count, texture and composition carry over."""
     model = SourceModel(

@@ -58,6 +58,7 @@ class Processor(QObject):
     simplifyingChanged = Signal()
     renderModeChanged = Signal()
     selectionChanged = Signal()
+    upAxisChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -92,8 +93,9 @@ class Processor(QObject):
         self._source_unit = "m"
         self._target_unit = "m"
         # up-axis — which source axis points up; "y" is the no-op (viewport up).
-        # Baked at export and reflected in the viewport (the rendered buffers are
-        # rebuilt rotated when it changes).
+        # Baked into the geometry at export; the viewport reflects it as a cheap,
+        # instant render-time rotation of the scene node (QML), so toggling never
+        # rebuilds the heavy buffers and the before/after split stays in lockstep.
         self._up_axis = "y"
 
     def _current(self):
@@ -349,39 +351,23 @@ class Processor(QObject):
         self._feed_mesh_view(self._simplified_mesh, model)
 
     def _feed_mesh_view(self, view, model) -> None:
-        """Rebuild ``model``'s render buffers, rotated to the up-axis, for ``view``.
+        """Rebuild ``model``'s render buffers and hand them to ``view``.
 
         Runs off the GUI thread, so the (numpy) interleave never hitches it. The
-        geometry is remapped to the chosen up-axis first so the viewport reflects
-        the choice (``"y"`` is a no-op). The texture follows the model — empty URL
-        when none was found. The viewport is a non-critical projection: if building
-        its buffers fails, the prior mesh stays on screen and the load → export
-        flow is untouched.
+        buffers carry the model's own (un-rotated) geometry — the up-axis is applied
+        in the viewport as a render-time scene rotation, not baked here, so toggling
+        it never rebuilds these (heavy) buffers. The texture follows the model —
+        empty URL when none was found. The viewport is a non-critical projection: if
+        building its buffers fails, the prior mesh stays on screen and the load →
+        export flow is untouched.
         """
         try:
-            buffers = build_mesh_buffers(remap_up_axis(model, self._up_axis))
+            buffers = build_mesh_buffers(model)
         except Exception:  # viewport is secondary — never break simplify/export
             return
         texture = model.texture_path
         url = QUrl.fromLocalFile(str(texture)) if texture else QUrl()
         view.update(buffers, url)
-
-    def _reorient_views(self) -> None:
-        """Rebuild both sides' buffers for the current up-axis, off the GUI thread.
-
-        Toggling the up-axis re-rotates the rendered geometry without re-running the
-        (expensive) simplify — the cut is orientation-independent, so only the view
-        buffers change.
-        """
-        if self._model is None:
-            return
-
-        def work() -> None:
-            self._feed_mesh_view(self._original_mesh, self._model)
-            if self._simplified is not None:
-                self._feed_mesh_view(self._simplified_mesh, self._simplified)
-
-        threading.Thread(target=work, daemon=True).start()
 
     def _clamp_target(self, target: int) -> int:
         """Keep the target within [floor, original] — no up-sampling, no zero. The
@@ -455,10 +441,10 @@ class Processor(QObject):
     def _set_up_axis(self, value: str) -> None:
         if value in UP_AXES and value != self._up_axis:
             self._up_axis = value
-            self.scaleChanged.emit()
-            self._reorient_views()  # rebuild the rendered buffers, rotated
+            self.upAxisChanged.emit()  # QML rotates the scene node + reframes
+            self.scaleChanged.emit()  # the size readout follows the new orientation
 
-    upAxis = Property(str, _get_up_axis, _set_up_axis, notify=scaleChanged)
+    upAxis = Property(str, _get_up_axis, _set_up_axis, notify=upAxisChanged)
 
     def _get_scaled_dimensions(self) -> str:
         """The model's resulting real-world size in the target unit — the §7 delta."""

@@ -37,8 +37,16 @@ def remap_up_axis(model: SourceModel, up_axis: str) -> SourceModel:
     angle, direction = _TO_Y[up_axis]
     matrix = trimesh.transformations.rotation_matrix(angle, direction)
 
-    geometry = model.geometry.copy()
-    normals = getattr(geometry, "vertex_normals", None)
+    # Read the cached normals from the ORIGINAL loaded mesh (it carries them from
+    # the OBJ). Reading them from a fresh .copy() instead drops the cache and forces
+    # a full normal recompute — a multi-second scipy-fallback grind on the 646k
+    # mesh, on every up-axis toggle. Rotate the cached normals onto the copy by hand
+    # so the copy never has to recompute its own.
+    source = model.geometry
+    normals = getattr(source, "vertex_normals", None) if isinstance(
+        source, trimesh.Trimesh
+    ) else None
+    geometry = source.copy()
     geometry.apply_transform(matrix)
     if normals is not None:
         geometry.vertex_normals = normals @ matrix[:3, :3].T

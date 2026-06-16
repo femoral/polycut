@@ -23,6 +23,22 @@ Item {
     readonly property var afterMesh: simplified && simplified.hasMesh ? simplified : original
     readonly property bool textured: original && original.textureUrl.toString() !== ""
 
+    // Up-axis remap (#12): the viewport shows the chosen orientation as an instant
+    // render-time rotation of the model node — both sides share one euler, so the
+    // split stays seamless and y→z→y returns exactly. The export bakes the same
+    // rotation in core. Euler matches polycut.core.orient: +Z→+Y is −90° about X,
+    // +X→+Y is +90° about Z; "y" is the identity.
+    readonly property string upAxis: processor.upAxis
+    readonly property vector3d upEuler: upAxis === "z" ? Qt.vector3d(-90, 0, 0)
+        : upAxis === "x" ? Qt.vector3d(0, 0, 90)
+        : Qt.vector3d(0, 0, 0)
+    // Rotate about the model's centre so framing stays put as it turns.
+    readonly property vector3d modelCenter: original
+        ? Qt.vector3d((original.boundsMin.x + original.boundsMax.x) / 2,
+                      (original.boundsMin.y + original.boundsMax.y) / 2,
+                      (original.boundsMin.z + original.boundsMax.z) / 2)
+        : Qt.vector3d(0, 0, 0)
+
     // "original" · "split" · "simplified" — the whole-viewport toggle; "split" is
     // the draggable-divider comparison.
     property string viewMode: "split"
@@ -72,6 +88,13 @@ Item {
         pivot.position = _center();
         camera.z = _radius() * 3.2;  // pull back enough to hold the whole model
     }
+    // Reset to the default framed front view — used when the up-axis changes so the
+    // re-oriented model is shown head-on instead of from the previous orbit (#12).
+    function _resetView() {
+        pivot.position = _center();
+        camera.position = Qt.vector3d(0, 0, _radius() * 3.2);
+        camera.eulerRotation = Qt.vector3d(0, 0, 0);
+    }
 
     // ---- before side (original, full-res): solid + edge lines ----------
     View3D {
@@ -97,22 +120,27 @@ Item {
             PerspectiveCamera { id: camera; z: 6; clipNear: 0.01 + root.renderModeNudge }
         }
 
-        Model {  // the shaded solid; hidden in Wireframe so only the lines show
-            visible: root.original && root.original.hasMesh && root.showFill
-            geometry: MeshGeometry { meshView: root.original }
-            materials: PrincipledMaterial {
-                baseColor: Theme.fg1
-                baseColorMap: root.textured ? beforeTexture : null
-                roughness: 0.85
+        Node {  // model node — render-time up-axis rotation (#12), shared by both passes
+            pivot: root.modelCenter
+            eulerRotation: root.upEuler
+
+            Model {  // the shaded solid; hidden in Wireframe so only the lines show
+                visible: root.original && root.original.hasMesh && root.showFill
+                geometry: MeshGeometry { meshView: root.original }
+                materials: PrincipledMaterial {
+                    baseColor: Theme.fg1
+                    baseColorMap: root.textured ? beforeTexture : null
+                    roughness: 0.85
+                }
             }
-        }
-        Model {  // edges / wireframe: same vertices, depth-tested against the solid
-            visible: root.original && root.original.hasMesh && root.showWire
-            depthBias: root.lineDepthBias
-            geometry: MeshGeometry { meshView: root.original; topology: "lines" }
-            materials: PrincipledMaterial {
-                baseColor: Theme.teal
-                lighting: PrincipledMaterial.NoLighting  // flat lines, not shaded
+            Model {  // edges / wireframe: same vertices, depth-tested against the solid
+                visible: root.original && root.original.hasMesh && root.showWire
+                depthBias: root.lineDepthBias
+                geometry: MeshGeometry { meshView: root.original; topology: "lines" }
+                materials: PrincipledMaterial {
+                    baseColor: Theme.teal
+                    lighting: PrincipledMaterial.NoLighting  // flat lines, not shaded
+                }
             }
         }
         Texture { id: beforeTexture; source: root.original ? root.original.textureUrl : "" }
@@ -163,22 +191,27 @@ Item {
                     clipNear: camera.clipNear
                 }
 
-                Model {  // the shaded solid
-                    visible: root.afterMesh && root.afterMesh.hasMesh && root.showFill
-                    geometry: MeshGeometry { meshView: root.afterMesh }
-                    materials: PrincipledMaterial {
-                        baseColor: Theme.fg1
-                        baseColorMap: root.textured ? afterTexture : null
-                        roughness: 0.85
+                Node {  // model node — same render-time up-axis rotation as the before side
+                    pivot: root.modelCenter
+                    eulerRotation: root.upEuler
+
+                    Model {  // the shaded solid
+                        visible: root.afterMesh && root.afterMesh.hasMesh && root.showFill
+                        geometry: MeshGeometry { meshView: root.afterMesh }
+                        materials: PrincipledMaterial {
+                            baseColor: Theme.fg1
+                            baseColorMap: root.textured ? afterTexture : null
+                            roughness: 0.85
+                        }
                     }
-                }
-                Model {  // edges / wireframe lines, depth-tested against the solid
-                    visible: root.afterMesh && root.afterMesh.hasMesh && root.showWire
-                    depthBias: root.lineDepthBias
-                    geometry: MeshGeometry { meshView: root.afterMesh; topology: "lines" }
-                    materials: PrincipledMaterial {
-                        baseColor: Theme.teal
-                        lighting: PrincipledMaterial.NoLighting
+                    Model {  // edges / wireframe lines, depth-tested against the solid
+                        visible: root.afterMesh && root.afterMesh.hasMesh && root.showWire
+                        depthBias: root.lineDepthBias
+                        geometry: MeshGeometry { meshView: root.afterMesh; topology: "lines" }
+                        materials: PrincipledMaterial {
+                            baseColor: Theme.teal
+                            lighting: PrincipledMaterial.NoLighting
+                        }
                     }
                 }
                 Texture { id: afterTexture; source: root.afterMesh ? root.afterMesh.textureUrl : "" }
@@ -346,5 +379,12 @@ Item {
     Connections {
         target: processor.originalMesh
         function onChanged() { root._frame(); }
+    }
+
+    // Reset to a framed front view whenever the up-axis changes, so the re-oriented
+    // model is shown head-on rather than from the previous orbit (#12).
+    Connections {
+        target: processor
+        function onUpAxisChanged() { root._resetView(); }
     }
 }

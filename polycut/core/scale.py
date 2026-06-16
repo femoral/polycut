@@ -13,6 +13,8 @@ orientation is a separate concern — see :mod:`polycut.core.orient`.
 
 from __future__ import annotations
 
+import trimesh
+
 from polycut.core.model import SourceModel
 
 # How many metres one unit of each supported unit represents.
@@ -73,11 +75,16 @@ def scale_geometry(model: SourceModel, factor: float) -> SourceModel:
     Topology, UVs and the texture are untouched — only vertex positions move, so
     the face count and texture carry over unchanged.
     """
-    geometry = model.geometry.copy()
     # A uniform positive scale leaves unit normals unchanged, but trimesh drops
-    # the cached normals on any transform — carry them across so the export
-    # doesn't (slowly) recompute them for a heavy mesh.
-    normals = getattr(geometry, "vertex_normals", None)
+    # the cached normals on any transform — carry them across so the export doesn't
+    # (slowly) recompute them for a heavy mesh. Read them from the ORIGINAL (where
+    # they're cached); reading from the fresh .copy() would itself drop the cache
+    # and force a multi-second scipy-fallback recompute on the 646k mesh.
+    source = model.geometry
+    normals = getattr(source, "vertex_normals", None) if isinstance(
+        source, trimesh.Trimesh
+    ) else None
+    geometry = source.copy()
     geometry.apply_scale(factor)
     if normals is not None:
         geometry.vertex_normals = normals
