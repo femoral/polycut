@@ -33,6 +33,18 @@ from polycut.core.scale import UNIT_METERS, UNIT_NAMES, detect_source_unit
 DEFAULT_REDUCTION = 0.25  # keep ~25% of faces — the −75% default applied on load
 MIN_FACES = 100  # floor so the slider can't collapse the mesh to nothing
 RENDER_MODES = ("shaded", "edges", "wireframe")  # viewport shading modes (#9)
+# Simplify presets / LOD ladder (#14): (label, reduction fraction). Descending
+# detail — Full keeps every face, each step reduces harder. Balanced == the −75%
+# DEFAULT_REDUCTION, so a freshly-loaded model already sits on it; Min (−95%) lines
+# up with the slider's 95% ceiling. The bridge maps an index to a target face
+# count; the existing simplify path applies it.
+SIMPLIFY_PRESETS = (
+    ("Full", 0.0),
+    ("High", 0.5),
+    ("Balanced", 0.75),
+    ("Low", 0.9),
+    ("Min", 0.95),
+)
 
 
 def _to_path(value: str) -> Path:
@@ -405,6 +417,60 @@ class Processor(QObject):
             self._simplifier.close()
         self._simplifier = None
         self._simplifier_model = None
+
+    # ---- preset / LOD ladder (#14) -------------------------------------
+    def _get_simplify_presets(self) -> list:
+        """The preset labels, in ladder order — the stepper's center values."""
+        return [name for name, _ in SIMPLIFY_PRESETS]
+
+    simplifyPresets = Property("QVariantList", _get_simplify_presets, constant=True)
+
+    def _preset_target(self, index: int) -> int:
+        """The clamped target face count for preset ``index`` on the loaded model."""
+        _, fraction = SIMPLIFY_PRESETS[index]
+        return self._clamp_target(round(self._model.face_count * (1 - fraction)))
+
+    def _get_current_preset_index(self) -> int:
+        """Which preset the current target matches, or -1 when off-ladder (Custom)
+        — e.g. after the slider lands on an in-between value. Derived from the
+        target, so it follows every cut off the same statsChanged the badge uses."""
+        if not self._model:
+            return -1
+        for index in range(len(SIMPLIFY_PRESETS)):
+            if self._preset_target(index) == self._target:
+                return index
+        return -1
+
+    currentPresetIndex = Property(
+        int, _get_current_preset_index, notify=statsChanged
+    )
+
+    @Slot(int)
+    def applyPreset(self, index: int) -> None:
+        """Set the simplify target from a preset — drives the same cut the slider
+        does, so the slider, badge and before/after preview all follow."""
+        index = int(index)
+        if self._model is None or not 0 <= index < len(SIMPLIFY_PRESETS):
+            return
+        self.simplify(self._preset_target(index))
+
+    @Slot(int)
+    def stepPreset(self, direction: int) -> None:
+        """Step one rung along the ladder. ``direction`` > 0 reduces harder (smaller
+        target), < 0 keeps more. From a Custom target it jumps to the adjacent preset
+        in that direction; at either end it clamps (no wrap). Comparing targets — not
+        indices — means the same rule serves the on-ladder and Custom cases."""
+        if self._model is None:
+            return
+        targets = [self._preset_target(i) for i in range(len(SIMPLIFY_PRESETS))]
+        current = self._target
+        if direction > 0:  # more reduction → the next smaller target
+            below = [i for i, t in enumerate(targets) if t < current]
+            index = min(below) if below else len(targets) - 1
+        else:  # less reduction → the next larger target
+            above = [i for i, t in enumerate(targets) if t > current]
+            index = max(above) if above else 0
+        self.applyPreset(index)
 
     # ---- scale + units -------------------------------------------------
     def _get_units(self) -> list:

@@ -10,4 +10,5 @@ UnitSelect UnitSelect.qml
 EmptyState EmptyState.qml
 Toast Toast.qml
 SegmentedToggle SegmentedToggle.qml
+Stepper Stepper.qml
 Viewport Viewport.qml

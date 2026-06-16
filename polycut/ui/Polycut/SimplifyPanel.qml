@@ -75,6 +75,18 @@ ColumnLayout {
     Section {
         title: "simplify"
 
+        // preset / LOD stepper — one-click reduction targets (§6); the slider below
+        // fine-tunes. Setting a preset runs the same cut, so the slider, badge and
+        // before/after preview all follow. Shows "Custom" when the slider lands
+        // between presets.
+        Stepper {
+            Layout.fillWidth: true
+            labels: processor.simplifyPresets
+            currentIndex: processor.currentPresetIndex
+            onStepped: direction => processor.stepPreset(direction)
+            onJumped: index => processor.applyPreset(index)
+        }
+
         // reduction slider + live −NN% badge (§6)
         RowLayout {
             Layout.fillWidth: true
