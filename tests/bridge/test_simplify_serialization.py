@@ -28,16 +28,27 @@ def test_simplify_requests_never_overlap(monkeypatch):
     live = {"now": 0, "peak": 0}
     guard = threading.Lock()
 
-    def fake_simplify(model, target_faces):
-        with guard:
-            live["now"] += 1
-            live["peak"] = max(live["peak"], live["now"])
-        time.sleep(0.05)  # hold the "decimation" open so overlaps would be visible
-        with guard:
-            live["now"] -= 1
-        return SimpleNamespace(face_count=target_faces, has_texture=False, texture_path=None)
+    class FakeSimplifier:
+        """A loaded simplifier whose re-cut holds long enough to expose overlaps."""
 
-    monkeypatch.setattr(processor_module, "simplify_model", fake_simplify)
+        def __init__(self, model):
+            self.model = model
+
+        def simplify(self, target_faces):
+            with guard:
+                live["now"] += 1
+                live["peak"] = max(live["peak"], live["now"])
+            time.sleep(0.05)  # hold the "decimation" open so overlaps would be visible
+            with guard:
+                live["now"] -= 1
+            return SimpleNamespace(
+                face_count=target_faces, has_texture=False, texture_path=None
+            )
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(processor_module, "ModelSimplifier", FakeSimplifier)
 
     proc = Processor()
     proc._model = SimpleNamespace(face_count=1000, source_path=Path("model.obj"))

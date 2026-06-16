@@ -26,11 +26,71 @@ def simplify_model(model: SourceModel, target_faces: int) -> SourceModel:
     Returns a new :class:`SourceModel` whose geometry carries the reduced mesh
     with intact UVs; ``texture_path`` is carried over unchanged so the export
     copies the same baked texture beside the output.
+
+    Stateless: parses the ``.obj`` from disk every call. For repeated cuts of the
+    same model (the slider settling on target after target) use
+    :class:`ModelSimplifier`, which parses once and re-cuts from memory.
     """
     import pymeshlab  # heavy native dep; import lazily so load/export stay light
 
     ms = pymeshlab.MeshSet()
     ms.load_new_mesh(str(model.source_path))
+    return _collapse_current(ms, target_faces, model)
+
+
+class ModelSimplifier:
+    """Parse a Source model's ``.obj`` once, then re-cut it from memory (#18).
+
+    The 70 MB Meshy ``.obj`` is loaded into a single PyMeshLab ``MeshSet`` at
+    construction and kept as the pristine original. Each :meth:`simplify` runs
+    the same texture-preserving quadric collapse as :func:`simplify_model`, but
+    on a fresh **copy** of that original — never the already-decimated result of
+    a prior cut — so repeated slider settles skip the redundant disk re-parse
+    while every cut starts from the full-resolution mesh. Output is identical to
+    the stateless path (per ADR-0003). Not thread-safe: PyMeshLab/VCG is not, so
+    callers must serialize :meth:`simplify` calls.
+    """
+
+    def __init__(self, model: SourceModel) -> None:
+        import pymeshlab
+
+        self._model = model
+        self._ms = pymeshlab.MeshSet()
+        self._ms.load_new_mesh(str(model.source_path))  # the one and only parse
+        self._original_id = self._ms.current_mesh_id()
+
+    def simplify(self, target_faces: int) -> SourceModel:
+        """Re-cut the in-memory original toward ``target_faces``.
+
+        Decimation is destructive, so each call works on a throwaway copy of the
+        pristine original and discards it afterwards — keeping memory bounded to
+        the original plus one transient cut.
+        """
+        if self._ms is None:
+            raise RuntimeError("ModelSimplifier is closed")
+
+        self._ms.set_current_mesh(self._original_id)
+        self._ms.generate_copy_of_current_mesh()  # copy becomes the current mesh
+        working_id = self._ms.current_mesh_id()
+        try:
+            return _collapse_current(self._ms, target_faces, self._model)
+        finally:
+            self._ms.set_current_mesh(working_id)
+            self._ms.delete_current_mesh()  # drop the copy; original stays pristine
+
+    def close(self) -> None:
+        """Release the loaded mesh. Idempotent; the instance is unusable after."""
+        self._ms = None  # native VCG memory is freed when the MeshSet is collected
+
+    def __enter__(self) -> "ModelSimplifier":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
+def _collapse_current(ms, target_faces: int, model: SourceModel) -> SourceModel:
+    """Run the texture-preserving collapse on ``ms``'s current mesh and extract it."""
     ms.meshing_decimation_quadric_edge_collapse_with_texture(
         targetfacenum=int(target_faces),
         preserveboundary=True,  # keep silhouette edges so the outline still reads

@@ -16,11 +16,11 @@ from pathlib import Path
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
 from polycut.core import (
+    ModelSimplifier,
     export_collada,
     load_source_model,
     scale_factor,
     scale_geometry,
-    simplify_model,
 )
 from polycut.core.scale import UNIT_METERS, UNIT_NAMES
 
@@ -56,6 +56,12 @@ class Processor(QObject):
         self._model = None  # the loaded original (source for re-simplify)
         self._simplified = None  # current decimated model; what export writes
         self._target = 0  # requested target face count
+        # The OBJ parsed into PyMeshLab once per model; re-cut from memory on each
+        # settle (#18). Built + disposed only on the serialized simplify worker, so
+        # PyMeshLab is never touched from two threads. _simplifier_model records
+        # which model it holds, so opening another model rebuilds and disposes it.
+        self._simplifier = None
+        self._simplifier_model = None
         self._busy = False
         self._status = "Awaiting import"
         # PyMeshLab is not thread-safe — serialize decimations. _pending_target
@@ -207,8 +213,9 @@ class Processor(QObject):
                     return
 
             try:
-                simplified = simplify_model(self._model, target)
+                simplified = self._simplifier_for(self._model).simplify(target)
             except Exception as exc:
+                self._dispose_simplifier()
                 with self._simplify_guard:
                     self._simplify_active = False
                     self._pending_target = None
@@ -234,6 +241,23 @@ class Processor(QObject):
         if not self._model:
             return max(MIN_FACES, target)
         return max(MIN_FACES, min(target, self._model.face_count))
+
+    def _simplifier_for(self, model):
+        """The loaded simplifier for ``model``, parsing once and disposing the
+        previous model's on a model switch. Called only from the simplify worker."""
+        if self._simplifier is None or self._simplifier_model is not model:
+            self._dispose_simplifier()
+            self._simplifier = ModelSimplifier(model)
+            self._simplifier_model = model
+        return self._simplifier
+
+    def _dispose_simplifier(self) -> None:
+        """Release the loaded mesh held for the previous model — no leak, no stale
+        geometry when another model is opened."""
+        if self._simplifier is not None:
+            self._simplifier.close()
+        self._simplifier = None
+        self._simplifier_model = None
 
     # ---- scale + units -------------------------------------------------
     def _get_units(self) -> list:

@@ -7,10 +7,11 @@ it through a thin bridge object, never the other way around.
 from polycut.core.export import ExportResult, export_collada
 from polycut.core.model import SourceModel, load_source_model
 from polycut.core.scale import scale_factor, scale_geometry
-from polycut.core.simplify import simplify_model
+from polycut.core.simplify import ModelSimplifier, simplify_model
 
 __all__ = [
     "ExportResult",
+    "ModelSimplifier",
     "SourceModel",
     "export_collada",
     "load_source_model",
