@@ -1,0 +1,9 @@
+newmtl mat_seat
+Kd 0.20 0.83 0.77
+Ka 0 0 0
+Ks 0 0 0
+
+newmtl mat_frame
+Kd 0.97 0.43 0.45
+Ka 0 0 0
+Ks 0 0 0

@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+import trimesh
 
 
 @dataclass(frozen=True)
@@ -34,8 +35,15 @@ class MeshBuffers:
 
 
 def build_mesh_buffers(model) -> MeshBuffers:
-    """Build the render buffers for ``model``'s current geometry."""
+    """Build the render buffers for ``model``'s current geometry.
+
+    A multi-object model loads as a ``trimesh.Scene``; the viewport draws the
+    whole model as one mesh, so the scene is fused into a single ``Trimesh``
+    first (every geometry's triangles, not just the first).
+    """
     geometry = model.geometry
+    if isinstance(geometry, trimesh.Scene):
+        geometry = geometry.to_geometry()
 
     positions = np.asarray(geometry.vertices, dtype=np.float32)
     normals = np.asarray(geometry.vertex_normals, dtype=np.float32)

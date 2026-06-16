@@ -15,8 +15,12 @@ import numpy as np
 import pytest
 import trimesh
 
-from polycut.core import build_mesh_buffers
+from polycut.core import build_mesh_buffers, load_source_model
 from polycut.core.model import SourceModel
+
+MULTI_OBJECT = (
+    Path(__file__).resolve().parents[1] / "fixtures" / "multi_object" / "two_cubes.obj"
+)
 
 
 def _vertex_floats(buffers):
@@ -74,6 +78,56 @@ def textured_model(tmp_path):
         object_count=1,
         texture_path=texture,
     )
+
+
+@pytest.fixture
+def multi_object_model():
+    """A Scene of two separate quads — the multi-object case. trimesh loads a
+    multi-material OBJ as a Scene, not a single Trimesh, so the viewport buffer
+    builder has to cope with one."""
+    def quad(x):
+        return trimesh.Trimesh(
+            vertices=np.array(
+                [[x, 0, 0], [x + 1, 0, 0], [x + 1, 1, 0], [x, 1, 0]], dtype=np.float64
+            ),
+            faces=np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64),
+            vertex_normals=np.tile([0.0, 0.0, 1.0], (4, 1)),
+            process=False,
+        )
+    scene = trimesh.Scene([quad(0.0), quad(2.0)])
+    return SourceModel(
+        source_path=Path("two.obj"),
+        geometry=scene,
+        face_count=4,
+        object_count=2,
+        texture_path=None,
+    )
+
+
+def test_scene_model_buffers_fuse_every_geometry(multi_object_model):
+    """A multi-geometry model renders as one fused mesh — the viewport draws the
+    whole model, so its buffers carry every geometry's triangles and vertices, not
+    just the first. Without this a multi-object model renders blank."""
+    buffers = build_mesh_buffers(multi_object_model)
+
+    assert buffers.triangle_count == 4  # both quads, 2 triangles each
+    assert buffers.vertex_count == 8  # both quads, 4 vertices each
+    assert buffers.line_count > 0  # edges built off the fused mesh
+
+
+def test_committed_multi_object_fixture_loads_and_fuses():
+    """The multi-material validation fixture loads as two outliner rows and its
+    buffers fuse both cubes — the real-file multi-object path, end to end."""
+    model = load_source_model(MULTI_OBJECT)
+
+    assert [(o.name, o.face_count) for o in model.objects] == [
+        ("two_cubes", 12),
+        ("two_cubes.1", 12),
+    ]
+
+    buffers = build_mesh_buffers(model)
+    assert buffers.triangle_count == 24
+    assert buffers.vertex_count == 16
 
 
 def test_buffers_report_mesh_counts(textured_model):
