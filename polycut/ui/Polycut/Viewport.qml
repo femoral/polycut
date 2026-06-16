@@ -51,16 +51,10 @@ Item {
     readonly property real renderModeNudge: renderMode === "edges" ? 0.0005
         : renderMode === "wireframe" ? 0.001 : 0
 
-    // Outliner selection → viewport highlight (#11): the selected object gets a
-    // subtle teal emissive sheen on its fill. The viewport renders the model as one
-    // fused mesh (per-object isolation is the MVP-3 Part split), so this emphasises
-    // the whole selected object. Gated to multi-object models: a single-blob Source
-    // model is always-selected, so tinting it permanently would be noise — the
-    // selection→highlight link is shown only when there's more than one object.
-    readonly property vector3d highlightEmissive:
-        (processor.objectCount > 1 && processor.selectedObjectIndex >= 0)
-            ? Qt.vector3d(Theme.teal.r, Theme.teal.g, Theme.teal.b).times(0.12)
-            : Qt.vector3d(0, 0, 0)
+    // Outliner selection is reflected in the left panel (row accent) and the status
+    // bar — not in the 3D view. A whole-mesh tint can't isolate one object in the
+    // fused mesh, and with auto-select it's always on, so it carries no real signal;
+    // true per-object viewport highlight needs the MVP-3 Part split (#11 / story 12).
 
     function _center() {
         return Qt.vector3d(
@@ -110,7 +104,6 @@ Item {
                 baseColor: Theme.fg1
                 baseColorMap: root.textured ? beforeTexture : null
                 roughness: 0.85
-                emissiveFactor: root.highlightEmissive  // teal sheen when selected (#11)
             }
         }
         Model {  // edges / wireframe: same vertices, depth-tested against the solid
@@ -177,7 +170,6 @@ Item {
                         baseColor: Theme.fg1
                         baseColorMap: root.textured ? afterTexture : null
                         roughness: 0.85
-                        emissiveFactor: root.highlightEmissive  // teal sheen when selected (#11)
                     }
                 }
                 Model {  // edges / wireframe lines, depth-tested against the solid
