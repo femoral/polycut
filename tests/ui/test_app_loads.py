@@ -23,8 +23,16 @@ def test_main_qml_loads_without_errors():
 
     messages: list[str] = []
 
+    # The 3D viewport can't initialise a GPU backend under the offscreen platform,
+    # so QtQuick3D warns it "is not functional" and won't draw. That's purely an
+    # environmental limitation of the headless test host — not a QML defect — so it
+    # is ignored here; the shaded render is verified by eye (HITL, #15).
+    benign = ("not based on QRhi", "Qt Quick 3D is not functional", "isApiRhiBased")
+
     def handler(mode, _context, message):
         if mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg, QtMsgType.QtFatalMsg):
+            if any(marker in message for marker in benign):
+                return
             messages.append(message)
 
     qInstallMessageHandler(handler)

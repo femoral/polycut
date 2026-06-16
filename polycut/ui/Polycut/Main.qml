@@ -239,10 +239,15 @@ ApplicationWindow {
                     onLoadSample: processor.loadFile(sampleModelPath)
                 }
 
-                // Once a model is loaded the centre is an empty canvas — the
-                // live 3D viewport ships in MVP-2. The DropArea below keeps it a
-                // working drop target (load / replace a model); no placeholder.
+                // The live 3D viewport (MVP-2) — shaded, textured render of the
+                // current cut, orbit/pan/zoom. Replaces the MVP-1 empty canvas.
+                Viewport {
+                    anchors.fill: parent
+                    visible: processor.hasModel
+                }
 
+                // The DropArea keeps the stage a working drop target (load /
+                // replace a model) over both the empty state and the viewport.
                 DropArea {
                     anchors.fill: parent
                     onEntered: (drag) => { if (drag.hasUrls) win.dragging = true; }

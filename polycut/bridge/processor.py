@@ -15,8 +15,10 @@ from pathlib import Path
 
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
+from polycut.bridge.mesh_view import MeshView
 from polycut.core import (
     ModelSimplifier,
+    build_mesh_buffers,
     export_collada,
     load_source_model,
     scale_factor,
@@ -56,6 +58,9 @@ class Processor(QObject):
         self._model = None  # the loaded original (source for re-simplify)
         self._simplified = None  # current decimated model; what export writes
         self._target = 0  # requested target face count
+        # The mesh + texture the Qt3D viewport draws — refreshed off-thread with
+        # the current geometry's render buffers each time a cut settles (#8).
+        self._mesh_view = MeshView(self)
         # The OBJ parsed into PyMeshLab once per model; re-cut from memory on each
         # settle (#18). Built + disposed only on the serialized simplify worker, so
         # PyMeshLab is never touched from two threads. _simplifier_model records
@@ -105,6 +110,12 @@ class Processor(QObject):
         return self._model is not None
 
     hasModel = Property(bool, _get_has_model, notify=statsChanged)
+
+    def _get_mesh_data(self) -> MeshView:
+        """The current mesh + texture the viewport renders (#8)."""
+        return self._mesh_view
+
+    meshData = Property(QObject, _get_mesh_data, constant=True)
 
     def _get_file_name(self) -> str:
         return self._model.source_path.name if self._model else ""
@@ -229,12 +240,29 @@ class Processor(QObject):
                 if self._pending_target is not None:
                     continue  # a newer target arrived mid-run — serve it next
                 self._simplify_active = False
+            self._refresh_mesh_view(simplified)  # feed the viewport off-thread
             self._set_busy(False)
             self._set_status(f"Simplified to {simplified.face_count:,} faces")
             self.statsChanged.emit()
             self.scaleChanged.emit()  # the size readout follows the new geometry
             self.simplifyFinished.emit()
             return
+
+    def _refresh_mesh_view(self, model) -> None:
+        """Rebuild the viewport's buffers from ``model`` and hand them to QML.
+
+        Runs on the simplify worker, so the (numpy) interleave never hitches the
+        GUI thread. The texture follows the model — empty URL when none was found.
+        The viewport is a non-critical projection: if building its buffers fails,
+        the prior mesh stays on screen and the load → export flow is untouched.
+        """
+        try:
+            buffers = build_mesh_buffers(model)
+        except Exception:  # viewport is secondary — never break simplify/export
+            return
+        texture = model.texture_path
+        url = QUrl.fromLocalFile(str(texture)) if texture else QUrl()
+        self._mesh_view.update(buffers, url)
 
     def _clamp_target(self, target: int) -> int:
         """Keep the target within [MIN_FACES, original] — no up-sampling, no zero."""
