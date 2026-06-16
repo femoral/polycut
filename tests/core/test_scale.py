@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -9,6 +11,7 @@ import trimesh
 
 from polycut.core import export_collada, scale_factor, scale_geometry
 from polycut.core.model import SourceModel
+from polycut.core.scale import detect_source_unit
 
 
 def _extents(geometry):
@@ -53,6 +56,28 @@ def test_scale_keeps_precomputed_normals(box_model):
 
     assert "vertex_normals" in scaled.geometry._cache  # not dropped → export stays cheap
     assert np.allclose(scaled.geometry.vertex_normals, before)  # unit normals unchanged
+
+
+def _sized_box_model(largest_extent):
+    """A box whose largest dimension is ``largest_extent`` — for unit detection."""
+    box = trimesh.creation.box(extents=(largest_extent, largest_extent / 2, 0.1))
+    return SourceModel(Path("box.obj"), box, int(box.faces.shape[0]), 1, None)
+
+
+def test_detect_reads_furniture_sized_geometry_as_meters():
+    """A model a couple of metres across reads as metres — Meshy's native scale."""
+    assert detect_source_unit(_sized_box_model(1.9)) == "m"
+
+
+def test_detect_reads_millimetre_scaled_geometry_as_mm():
+    """The same couch authored at ×1000 reads as millimetres, not metres."""
+    assert detect_source_unit(_sized_box_model(1900.0)) == "mm"
+
+
+@pytest.mark.slow
+def test_detect_reads_the_meshy_sofa_as_meters(sofa_model):
+    """The real Meshy fixture (the known case the AC names) detects as metres."""
+    assert detect_source_unit(sofa_model) == "m"
 
 
 def test_scaled_export_declares_target_unit(box_model, tmp_path):

@@ -17,14 +17,16 @@ from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
 from polycut.bridge.mesh_view import MeshView
 from polycut.core import (
+    UP_AXES,
     ModelSimplifier,
     build_mesh_buffers,
     export_collada,
     load_source_model,
+    remap_up_axis,
     scale_factor,
     scale_geometry,
 )
-from polycut.core.scale import UNIT_METERS, UNIT_NAMES
+from polycut.core.scale import UNIT_METERS, UNIT_NAMES, detect_source_unit
 
 DEFAULT_REDUCTION = 0.25  # keep ~25% of faces — the −75% default applied on load
 MIN_FACES = 100  # floor so the slider can't collapse the mesh to nothing
@@ -89,6 +91,10 @@ class Processor(QObject):
         self._scale_multiplier = 1.0
         self._source_unit = "m"
         self._target_unit = "m"
+        # up-axis — which source axis points up; "y" is the no-op (viewport up).
+        # Baked at export and reflected in the viewport (the rendered buffers are
+        # rebuilt rotated when it changes).
+        self._up_axis = "y"
 
     def _current(self):
         """The model the UI reflects and export writes: simplified if present."""
@@ -265,6 +271,14 @@ class Processor(QObject):
             return
         self._model = model
         self._simplified = None  # show the original until the default reduction lands
+        # Pre-fill the source unit from the model's size — Meshy declares none. A
+        # manual pick afterwards stays put (detection only runs here, on load). The
+        # pre-fill is secondary: if a model can't be measured, keep the current unit
+        # rather than block the load.
+        try:
+            self._source_unit = detect_source_unit(model)
+        except Exception:
+            pass
         self._selected_index = 0 if model.objects else -1  # select the first object
         self.selectionChanged.emit()
         self._feed_mesh_view(self._original_mesh, model)  # original renders at once
@@ -335,20 +349,39 @@ class Processor(QObject):
         self._feed_mesh_view(self._simplified_mesh, model)
 
     def _feed_mesh_view(self, view, model) -> None:
-        """Rebuild ``model``'s render buffers and hand them to ``view``.
+        """Rebuild ``model``'s render buffers, rotated to the up-axis, for ``view``.
 
         Runs off the GUI thread, so the (numpy) interleave never hitches it. The
-        texture follows the model — empty URL when none was found. The viewport is
-        a non-critical projection: if building its buffers fails, the prior mesh
-        stays on screen and the load → export flow is untouched.
+        geometry is remapped to the chosen up-axis first so the viewport reflects
+        the choice (``"y"`` is a no-op). The texture follows the model — empty URL
+        when none was found. The viewport is a non-critical projection: if building
+        its buffers fails, the prior mesh stays on screen and the load → export
+        flow is untouched.
         """
         try:
-            buffers = build_mesh_buffers(model)
+            buffers = build_mesh_buffers(remap_up_axis(model, self._up_axis))
         except Exception:  # viewport is secondary — never break simplify/export
             return
         texture = model.texture_path
         url = QUrl.fromLocalFile(str(texture)) if texture else QUrl()
         view.update(buffers, url)
+
+    def _reorient_views(self) -> None:
+        """Rebuild both sides' buffers for the current up-axis, off the GUI thread.
+
+        Toggling the up-axis re-rotates the rendered geometry without re-running the
+        (expensive) simplify — the cut is orientation-independent, so only the view
+        buffers change.
+        """
+        if self._model is None:
+            return
+
+        def work() -> None:
+            self._feed_mesh_view(self._original_mesh, self._model)
+            if self._simplified is not None:
+                self._feed_mesh_view(self._simplified_mesh, self._simplified)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _clamp_target(self, target: int) -> int:
         """Keep the target within [floor, original] — no up-sampling, no zero. The
@@ -416,6 +449,17 @@ class Processor(QObject):
 
     targetUnit = Property(str, _get_target_unit, _set_target_unit, notify=scaleChanged)
 
+    def _get_up_axis(self) -> str:
+        return self._up_axis
+
+    def _set_up_axis(self, value: str) -> None:
+        if value in UP_AXES and value != self._up_axis:
+            self._up_axis = value
+            self.scaleChanged.emit()
+            self._reorient_views()  # rebuild the rendered buffers, rotated
+
+    upAxis = Property(str, _get_up_axis, _set_up_axis, notify=scaleChanged)
+
     def _get_scaled_dimensions(self) -> str:
         """The model's resulting real-world size in the target unit — the §7 delta."""
         model = self._current()
@@ -447,6 +491,7 @@ class Processor(QObject):
             )
             if factor != 1.0:
                 model = scale_geometry(model, factor)
+            model = remap_up_axis(model, self._up_axis)  # rotate upright ("y" no-op)
             result = export_collada(
                 model,
                 out,

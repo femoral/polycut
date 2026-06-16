@@ -3,10 +3,10 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import Polycut
 
-// Transform inspector section — scale only (the rest of Transform is MVP-2; no
-// up-axis control, that's handled in SketchUp). A scale multiplier plus source
-// and target unit selectors; the export bakes the result and declares the unit.
-// (design-system.md §2, §6)
+// Transform inspector section (#12): a scale multiplier, source/target unit
+// selectors (the source unit is auto-detected on load, overridable here), and an
+// up-axis toggle that rotates the model upright. The viewport reflects the up-axis
+// and the export bakes scale + remap and declares the unit. (design-system.md §2, §6)
 ColumnLayout {
     id: panel
     Layout.fillWidth: true
@@ -86,6 +86,26 @@ ColumnLayout {
                 Layout.fillWidth: true
                 unit: processor.targetUnit
                 onUnitPicked: (u) => processor.targetUnit = u
+            }
+        }
+
+        // up-axis remap — which source axis points up; rotates the model upright,
+        // reflected in the viewport and baked at export. "y" is Meshy's usual up.
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.gap
+
+            Text {
+                text: "up"
+                color: Theme.fg2
+                font.family: Theme.fontUi
+                font.pixelSize: Theme.fontSmall
+            }
+            Item { Layout.fillWidth: true }  // push the toggle to the right edge
+            SegmentedToggle {
+                modes: ["x", "y", "z"]
+                current: processor.upAxis
+                onSelected: (axis) => processor.upAxis = axis
             }
         }
 

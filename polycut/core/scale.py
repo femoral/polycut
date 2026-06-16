@@ -6,7 +6,9 @@ used to need Transmutr). The scale is **baked into the geometry** and the chosen
 target unit is also declared in the Collada ``<unit>`` metadata, so SketchUp Pro
 imports at the correct size without relying on its import-units dialog.
 
-There is deliberately no up-axis control — orientation is handled in SketchUp.
+Meshy exports carry no unit metadata, so :func:`detect_source_unit` infers one
+from the model's size to pre-fill the source unit (overridable). Up-axis
+orientation is a separate concern — see :mod:`polycut.core.orient`.
 """
 
 from __future__ import annotations
@@ -40,6 +42,29 @@ def scale_factor(multiplier: float, source_unit: str, target_unit: str) -> float
     this makes the real-world size ``raw × multiplier × metres(source_unit)``.
     """
     return multiplier * UNIT_METERS[source_unit] / UNIT_METERS[target_unit]
+
+
+# A real-world product (couch, chair, table) is plausibly between 0.1 m and 10 m
+# across. Detection picks the unit whose numbers land the model in that band.
+_FURNITURE_MIN_M = 0.1
+_FURNITURE_MAX_M = 10.0
+
+
+def detect_source_unit(model: SourceModel) -> str:
+    """Infer the unit the model's coordinates are expressed in, from its size.
+
+    Meshy exports real-world-scaled geometry but declares no unit, so we read the
+    largest bounding-box extent and pick the unit that lands the model in a
+    furniture-plausible range (~0.1–10 m). Units are tried metres-first so an
+    ambiguous size resolves to ``"m"`` — Meshy's native scale. Falls back to
+    ``"m"`` when nothing fits (the safe default for a Meshy source).
+    """
+    lo, hi = model.geometry.bounds
+    largest = float(max(hi - lo))
+    for unit in ("m", "cm", "mm", "in", "ft"):
+        if _FURNITURE_MIN_M <= largest * UNIT_METERS[unit] <= _FURNITURE_MAX_M:
+            return unit
+    return "m"
 
 
 def scale_geometry(model: SourceModel, factor: float) -> SourceModel:
