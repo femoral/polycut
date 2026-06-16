@@ -28,7 +28,7 @@ Button {
         color: control.primary
             ? (control.down ? Theme.tealDim : Theme.teal)
             : (control.down ? Theme.bg3 : Theme.bg2)
-        border.color: control.primary ? "transparent" : Theme.hairline
+        border.color: control.primary ? Theme.transparent : Theme.hairline
         border.width: control.primary ? 0 : Theme.borderThin
         opacity: control.enabled ? 1.0 : 0.5
         Behavior on color {

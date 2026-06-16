@@ -55,6 +55,7 @@ class Processor(QObject):
     scaleChanged = Signal()
     simplifyingChanged = Signal()
     renderModeChanged = Signal()
+    selectionChanged = Signal()
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -77,6 +78,7 @@ class Processor(QObject):
         self._simplifying = False  # a faithful cut is in flight → on-canvas chip
         self._status = "Awaiting import"
         self._render_mode = "shaded"  # viewport shading: shaded | edges | wireframe
+        self._selected_index = -1  # selected outliner row; -1 until a model loads
         # PyMeshLab is not thread-safe — serialize decimations. _pending_target
         # holds the latest requested target; one worker drains it, coalescing
         # rapid slider releases so only the most recent target actually runs.
@@ -189,6 +191,43 @@ class Processor(QObject):
 
     objectCount = Property(int, _get_object_count, notify=statsChanged)
 
+    def _get_outliner_objects(self) -> list:
+        """The Scene Outliner rows — one per object in the loaded file (#11)."""
+        if not self._model:
+            return []
+        return [
+            {"name": obj.name, "faceCount": obj.face_count}
+            for obj in self._model.objects
+        ]
+
+    outlinerObjects = Property(
+        "QVariantList", _get_outliner_objects, notify=statsChanged
+    )
+
+    def _get_selected_index(self) -> int:
+        return self._selected_index
+
+    def _set_selected_index(self, value: int) -> None:
+        value = int(value)
+        if value == self._selected_index:
+            return
+        if not 0 <= value < len(self._model.objects if self._model else ()):
+            return  # only existing rows are selectable
+        self._selected_index = value
+        self.selectionChanged.emit()
+
+    selectedObjectIndex = Property(
+        int, _get_selected_index, _set_selected_index, notify=selectionChanged
+    )
+
+    def _get_selected_name(self) -> str:
+        """The selected object's name, for the status bar's 'Selected: <object>'."""
+        if not self._model or not 0 <= self._selected_index < len(self._model.objects):
+            return ""
+        return self._model.objects[self._selected_index].name
+
+    selectedObjectName = Property(str, _get_selected_name, notify=selectionChanged)
+
     def _get_has_texture(self) -> bool:
         return bool(self._model and self._model.has_texture)
 
@@ -226,6 +265,8 @@ class Processor(QObject):
             return
         self._model = model
         self._simplified = None  # show the original until the default reduction lands
+        self._selected_index = 0 if model.objects else -1  # select the first object
+        self.selectionChanged.emit()
         self._feed_mesh_view(self._original_mesh, model)  # original renders at once
         self._target = self._clamp_target(round(model.face_count * DEFAULT_REDUCTION))
         self._set_busy(False)

@@ -24,6 +24,7 @@ QtObject {
     readonly property color coralDim: "#c5545b"  // warning pressed
 
     readonly property color hairline: Qt.rgba(0.95, 0.96, 0.97, 0.10)
+    readonly property color transparent: "transparent"  // explicit no-fill token
 
     // ---- Typography -----------------------------------------------------
     readonly property FontLoader _ui: FontLoader {

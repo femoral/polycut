@@ -14,6 +14,7 @@ from types import SimpleNamespace
 
 from polycut.bridge import processor as processor_module
 from polycut.bridge.processor import Processor
+from polycut.core.model import SceneObject
 
 
 class FakeSimplifier:
@@ -44,6 +45,7 @@ def _fake_model(path):
         object_count=1,
         has_texture=False,
         texture_path=None,
+        objects=(SceneObject(name=Path(path).stem, face_count=1000),),
     )
 
 

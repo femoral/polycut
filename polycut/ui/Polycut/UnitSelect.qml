@@ -70,7 +70,7 @@ ComboBox {
             verticalAlignment: Text.AlignVCenter
         }
         background: Rectangle {
-            color: control.highlightedIndex === index ? Theme.bg3 : "transparent"
+            color: control.highlightedIndex === index ? Theme.bg3 : Theme.transparent
         }
     }
 }

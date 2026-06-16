@@ -9,6 +9,14 @@ import trimesh
 
 
 @dataclass(frozen=True)
+class SceneObject:
+    """One row of the Scene Outliner: an object in the loaded file + its faces."""
+
+    name: str
+    face_count: int
+
+
+@dataclass(frozen=True)
 class SourceModel:
     """A loaded Source model plus the stats shown after import.
 
@@ -23,6 +31,7 @@ class SourceModel:
     face_count: int
     object_count: int
     texture_path: Path | None
+    objects: tuple[SceneObject, ...] = ()  # the model's composition, for the outliner
 
     @property
     def has_texture(self) -> bool:
@@ -45,12 +54,21 @@ def load_source_model(obj_path) -> SourceModel:
     )
     face_count = sum(int(m.faces.shape[0]) for m in meshes)
 
+    objects = tuple(
+        SceneObject(
+            name=obj_path.stem if i == 0 else f"{obj_path.stem}.{i}",
+            face_count=int(m.faces.shape[0]),
+        )
+        for i, m in enumerate(meshes)
+    )
+
     return SourceModel(
         source_path=obj_path,
         geometry=geometry,
         face_count=face_count,
         object_count=len(meshes),
         texture_path=_resolve_texture(obj_path),
+        objects=objects,
     )
 
 

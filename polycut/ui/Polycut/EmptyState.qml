@@ -16,7 +16,7 @@ Item {
         width: Math.min(parent.width - 2 * Theme.pad, 520)
         height: col.implicitHeight + Theme.sectionGap * 4
         radius: Theme.rLg
-        color: root.dragActive ? Qt.rgba(Theme.teal.r, Theme.teal.g, Theme.teal.b, 0.06) : "transparent"
+        color: root.dragActive ? Qt.rgba(Theme.teal.r, Theme.teal.g, Theme.teal.b, 0.06) : Theme.transparent
         border.color: root.dragActive ? Theme.teal : Theme.bg3
         border.width: root.dragActive ? Theme.borderThick : Theme.borderThin
         Behavior on border.color {

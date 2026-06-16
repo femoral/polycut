@@ -177,37 +177,64 @@ ApplicationWindow {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: processor.hasModel ? win.fmt(processor.faceCount) : "0"
+                            // running total = the model's composition (original faces),
+                            // matching the per-row counts; the live cut is the hero stat.
+                            text: processor.hasModel ? win.fmt(processor.originalFaceCount) : "0"
                             color: Theme.fg1
                             font.family: Theme.fontMono
                             font.pixelSize: Theme.fontSmall
                         }
                     }
 
-                    // object rows (one fused mesh in MVP-1)
-                    Rectangle {
-                        visible: processor.hasModel
+                    // object rows — one per object in the loaded file (#11). Selecting
+                    // a row highlights it in the viewport. List-row pattern (§6): name +
+                    // right-aligned mono face count; selected = teal left-accent + bg-2.
+                    ListView {
                         Layout.fillWidth: true
-                        implicitHeight: Theme.rowHeight
-                        radius: Theme.rSm
-                        color: Theme.bg2
-                        Rectangle { width: Theme.borderThick; height: parent.height; color: Theme.teal; radius: Theme.borderThin }
-                        RowLayout {
-                            anchors.fill: parent
-                            anchors.leftMargin: Theme.gap
-                            anchors.rightMargin: Theme.gap
-                            Text {
-                                text: "model"
-                                color: Theme.fg0
-                                font.family: Theme.fontUi
-                                font.pixelSize: Theme.fontBase
+                        Layout.fillHeight: true
+                        visible: processor.hasModel
+                        clip: true
+                        spacing: Theme.gapXs
+                        model: processor.outlinerObjects
+                        boundsBehavior: Flickable.StopAtBounds
+                        delegate: Rectangle {
+                            required property int index
+                            required property var modelData
+                            width: ListView.view.width
+                            implicitHeight: Theme.rowHeight
+                            radius: Theme.rSm
+                            readonly property bool selected: index === processor.selectedObjectIndex
+                            color: selected ? Theme.bg2 : Theme.transparent
+                            Rectangle {  // teal left-accent on the selected row
+                                width: Theme.borderThick
+                                height: parent.height
+                                radius: Theme.borderThin
+                                color: Theme.teal
+                                visible: parent.selected
                             }
-                            Item { Layout.fillWidth: true }
-                            Text {
-                                text: win.fmt(processor.faceCount)
-                                color: Theme.fg2
-                                font.family: Theme.fontMono
-                                font.pixelSize: Theme.fontSmall
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: Theme.gap
+                                anchors.rightMargin: Theme.gap
+                                Text {
+                                    text: modelData.name
+                                    color: Theme.fg0
+                                    font.family: Theme.fontUi
+                                    font.pixelSize: Theme.fontBase
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                Text {
+                                    text: win.fmt(modelData.faceCount)
+                                    color: Theme.fg2
+                                    font.family: Theme.fontMono
+                                    font.pixelSize: Theme.fontSmall
+                                }
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: processor.selectedObjectIndex = index
                             }
                         }
                     }
@@ -220,7 +247,7 @@ ApplicationWindow {
                         font.pixelSize: Theme.fontSmall
                     }
 
-                    Item { Layout.fillHeight: true }
+                    Item { visible: !processor.hasModel; Layout.fillHeight: true }
                 }
                 Rectangle { anchors.right: parent.right; height: parent.height; width: Theme.borderThin; color: Theme.hairline }
             }
@@ -344,6 +371,13 @@ ApplicationWindow {
                 Text {
                     text: processor.status
                     color: Theme.fg2
+                    font.family: Theme.fontUi
+                    font.pixelSize: Theme.fontSmall
+                }
+                Text {  // selection narration (§7): selected: <object>
+                    visible: processor.selectedObjectName !== ""
+                    text: "· selected: " + processor.selectedObjectName
+                    color: Theme.fg3
                     font.family: Theme.fontUi
                     font.pixelSize: Theme.fontSmall
                 }
