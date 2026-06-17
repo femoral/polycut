@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -45,7 +46,20 @@ def main() -> int:
     engine = create_engine(app)
     if not engine.rootObjects():
         return 1
-    return app.exec()
+    rc = app.exec()
+
+    # Hard-exit instead of unwinding. At normal interpreter shutdown the main thread
+    # runs Qt's global/static destructors (libQt6ShaderTools) while glibc is freeing
+    # a background worker thread's stack + TLS — two unsynchronised heap frees that
+    # trip a corruption abort ("malloc_consolidate(): unaligned fastbin chunk").
+    # Those background threads include scipy/numpy's OpenBLAS pool, spawned the first
+    # time the spatial brush builds its KD-tree. The event loop has returned and the
+    # app owns no unsaved state, so skip the racy teardown entirely and let the OS
+    # reclaim the process. (Confirmed from a core dump: thread in _dl_deallocate_tls,
+    # main thread in __run_exit_handlers → libQt6ShaderTools.)
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(rc)
 
 
 if __name__ == "__main__":
