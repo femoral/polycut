@@ -13,6 +13,7 @@ from polycut.core.picking import (
     add_to_part,
     colour_wand,
     pick_face,
+    screen_ray,
     subtract_from_part,
 )
 from polycut.core.scale import scale_factor, scale_geometry
@@ -41,6 +42,7 @@ __all__ = [
     "pick_face",
     "remap_up_axis",
     "scale_factor",
+    "screen_ray",
     "scale_geometry",
     "segment",
     "simplify_model",

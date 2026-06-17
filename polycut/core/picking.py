@@ -57,6 +57,32 @@ def pick_face(mesh, origin, direction) -> int | None:
     return int(candidates[np.argmin(t[candidates])])  # nearest hit wins
 
 
+def screen_ray(cam_pos, forward, up, fov_y: float, px: float, py: float, width: float, height: float):
+    """Unproject a screen pixel into a world-space ``(origin, direction)`` ray.
+
+    The bridge hands this the camera (position, forward + up axes, vertical field of
+    view in **degrees**) and the click pixel ``(px, py)`` measured from the top-left
+    of a ``width × height`` viewport. A pinhole model turns that into the ray
+    :func:`pick_face` consumes — origin at the camera, direction normalised. The
+    centre pixel shoots straight along ``forward``; pixels off-centre tilt by the
+    field of view and the viewport's aspect ratio.
+    """
+    cam_pos = np.asarray(cam_pos, dtype=np.float64)
+    forward = np.asarray(forward, dtype=np.float64)
+    forward = forward / np.linalg.norm(forward)
+    right = np.cross(forward, np.asarray(up, dtype=np.float64))
+    right = right / np.linalg.norm(right)
+    true_up = np.cross(right, forward)  # re-orthogonalised; unit since right ⟂ forward
+
+    ndc_x = (px + 0.5) / width * 2.0 - 1.0  # +1 at the right edge
+    ndc_y = 1.0 - (py + 0.5) / height * 2.0  # +1 at the top edge (py grows downward)
+    half_h = np.tan(np.radians(fov_y) / 2.0)
+    half_w = half_h * (width / height)
+
+    direction = forward + ndc_x * half_w * right + ndc_y * half_h * true_up
+    return cam_pos, direction / np.linalg.norm(direction)
+
+
 def colour_wand(mesh, texture, seed: int, threshold: float, mode: str = "local") -> np.ndarray:
     """Grow a face selection from ``seed`` by baked-texture colour.
 

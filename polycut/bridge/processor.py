@@ -14,9 +14,12 @@ import threading
 from dataclasses import replace
 from pathlib import Path
 
+import numpy as np
+from PIL import Image
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
 from polycut.bridge.mesh_view import MeshView
+from polycut.bridge.parts_view import PartsViewModel
 from polycut.core import (
     UP_AXES,
     ModelSimplifier,
@@ -86,6 +89,11 @@ class Processor(QObject):
         # (ADR-0003) — the viewport never blocks on the CPU collapse.
         self._original_mesh = MeshView(self)
         self._simplified_mesh = MeshView(self)
+        # The Parts view-model (#25): the QML Parts panel binds to it. Rebound to the
+        # simplified mesh on each settled cut, so Parts always carve the exact geometry
+        # the exporter writes — and a re-cut clears Parts (their labels indexed the old
+        # face set). Headless `core` owns the carving maths; this is its Qt projection.
+        self._parts = PartsViewModel(self)
         # The OBJ parsed into PyMeshLab once per model; re-cut from memory on each
         # settle (#18). Built + disposed only on the serialized simplify worker, so
         # PyMeshLab is never touched from two threads. _simplifier_model records
@@ -183,6 +191,12 @@ class Processor(QObject):
         return self._simplified_mesh
 
     simplifiedMesh = Property(QObject, _get_simplified_mesh, constant=True)
+
+    def _get_parts(self) -> PartsViewModel:
+        """The Parts view-model the QML Parts panel binds to (#25)."""
+        return self._parts
+
+    parts = Property(QObject, _get_parts, constant=True)
 
     def _get_file_name(self) -> str:
         return self._model.source_path.name if self._model else ""
@@ -360,6 +374,7 @@ class Processor(QObject):
                     continue  # a newer target arrived mid-run — serve it next
                 self._simplify_active = False
             self._refresh_mesh_view(simplified)  # feed the viewport off-thread
+            self._rebind_parts(simplified)  # Parts re-cut onto the fresh mesh (#25)
             self._set_busy(False)
             self._set_simplifying(False)  # fresh mesh swapped in — chip clears
             self._set_status(f"Simplified to {simplified.face_count:,} faces")
@@ -371,6 +386,22 @@ class Processor(QObject):
     def _refresh_mesh_view(self, model) -> None:
         """Feed the simplified (after) side with ``model``'s render buffers."""
         self._feed_mesh_view(self._simplified_mesh, model)
+
+    def _rebind_parts(self, model) -> None:
+        """Rebind the Parts view-model to the freshly-cut mesh + its baked texture,
+        clearing any Parts carved against the previous cut. Like the viewport, Parts
+        are a non-critical projection: if the texture can't be read, bind with none
+        (the brush still works) rather than break the load → export flow."""
+        texture = None
+        if model.texture_path:
+            try:
+                texture = np.asarray(Image.open(model.texture_path).convert("RGB"))
+            except Exception:
+                texture = None
+        try:
+            self._parts.rebind(model.geometry, texture)
+        except Exception:  # Parts are secondary — never break simplify/export
+            pass
 
     def _feed_mesh_view(self, view, model) -> None:
         """Rebuild ``model``'s render buffers and hand them to ``view``.
