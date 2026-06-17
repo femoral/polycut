@@ -4,6 +4,7 @@ This package has **no Qt dependency**: it is the test seam. The QML layer reache
 it through a thin bridge object, never the other way around.
 """
 
+from polycut.core.brush import SpatialBrush
 from polycut.core.export import ExportResult, export_collada
 from polycut.core.model import SceneObject, SourceModel, load_source_model
 from polycut.core.orient import UP_AXES, remap_up_axis
@@ -28,6 +29,7 @@ __all__ = [
     "PreserveOptions",
     "SceneObject",
     "SourceModel",
+    "SpatialBrush",
     "UNASSIGNED_ID",
     "UP_AXES",
     "add_to_part",
