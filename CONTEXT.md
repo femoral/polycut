@@ -9,8 +9,12 @@ A high-poly 3D mesh produced by Meshy.ai from a text or image prompt. Arrives as
 _Avoid_: scan, Meshy scan (Meshy generates, it does not scan)
 
 **Part**:
-A selectable sub-piece of a model (couch legs, cushions, frame) carrying its own material slot, so the designer can reassign materials per-piece inside SketchUp. The headline value of Polycut. A Source model currently contains zero parts (one fused mesh); creating parts is the hard, post-MVP-1 problem.
+A named, non-overlapping subset of a model's faces carrying its own material slot, so the designer can reassign materials per-piece inside SketchUp (no painting face-by-face). The headline value of Polycut. The *split itself* is the material fix: once pieces are separate slots, the designer swaps materials in SketchUp — so de-shine is a non-goal. Parts strictly **partition** the model — every face belongs to exactly one Part, with no gaps or overlaps. The boundary between Parts lives in the designer's head (frame vs cushion), not in the geometry: a Meshy model is a topological soup (thousands of disconnected shards) under one baked material, so Parts can't fall out of topology and are carved by hand with selection tools (texture-colour the primary signal). Creating Parts is MVP-3.
 _Avoid_: object, group, submesh (overloaded elsewhere)
+
+**Unassigned**:
+The built-in Part holding every face not yet carved into another Part. Starts as the whole model (zero user Parts) and shrinks as the designer carves Parts out of it — the remainder that keeps the partition exhaustive. Always present; exports as its own material slot if it still holds faces.
+_Avoid_: leftover, rest, default (be specific: "Unassigned")
 
 **Primary user**:
 An interior designer who builds client preview scenes in SketchUp and renders them in Enscape. Needs product models (couches, furniture) that aren't available as ready-made SketchUp assets.

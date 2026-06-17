@@ -14,8 +14,14 @@ default −75%, with a reduction slider + target-face input) → **scale** (mult
 source/target units, baked into the geometry with the unit declared in the `.dae`) →
 "Export to SketchUp" writes a textured `.dae` with the texture copied beside it.
 **Windows packaging** ships a self-contained build (no install) built in CI, and
-you can **open another model** without restarting. Next up is MVP-2 (issue #7): a
-live 3D viewport with before/after preview.
+you can **open another model** without restarting.
+
+MVP-2 is complete (issue #7): a live 3D viewport with view modes, a draggable
+before/after split, an interactive Scene Outliner, Preserve toggles, a preset /
+LOD stepper, and full transform (up-axis + units). Next up is MVP-3 (issue #19):
+**Parts** — carve the fused blob into named, non-overlapping pieces, each
+exported as its own SketchUp group with its own swappable material slot, so the
+designer reassigns materials per-piece instead of painting face-by-face.
 
 ## Architecture
 
