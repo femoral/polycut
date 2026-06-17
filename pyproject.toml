@@ -12,6 +12,9 @@ dependencies = [
     "pycollada>=0.8",
     "pillow>=10.0",
     "numpy>=1.26",
+    # k-means colour clustering (CIELAB) for the Parts split-by-material (MVP-3 / ADR-0004).
+    "scikit-learn>=1.4",
+    "scikit-image>=0.22",
     # GPLv3 — texture-preserving simplification (ADR-0002). Makes the bundle GPL.
     "pymeshlab>=2025.7",
 ]

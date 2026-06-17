@@ -9,6 +9,7 @@ from polycut.core.model import SceneObject, SourceModel, load_source_model
 from polycut.core.orient import UP_AXES, remap_up_axis
 from polycut.core.parts import UNASSIGNED_ID, Part, Partition
 from polycut.core.scale import scale_factor, scale_geometry
+from polycut.core.segment import face_colours, segment, split_by_colour
 from polycut.core.simplify import ModelSimplifier, PreserveOptions, simplify_model
 from polycut.core.viewport import MeshBuffers, build_mesh_buffers
 
@@ -25,9 +26,12 @@ __all__ = [
     "UP_AXES",
     "build_mesh_buffers",
     "export_collada",
+    "face_colours",
     "load_source_model",
     "remap_up_axis",
     "scale_factor",
     "scale_geometry",
+    "segment",
     "simplify_model",
+    "split_by_colour",
 ]
