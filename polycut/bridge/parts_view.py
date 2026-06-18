@@ -70,6 +70,13 @@ class PartsViewModel(QObject):
         self.activePartChanged.emit()
         self.highlightChanged.emit()
 
+    def export_partition(self) -> Partition | None:
+        """The live partition the exporter must mirror, so the ``.dae`` carries the
+        carved Parts (#19 story 18: preview == export). ``None`` until a mesh is
+        bound, in which case export falls back to its single-group writer. Its labels
+        index the bound (simplified) mesh's faces — the same geometry export writes."""
+        return self._partition
+
     @Slot(result=int)
     def createPart(self) -> int:
         """Add an empty Part, make it the active edit target, and return its id.
