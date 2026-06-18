@@ -1,6 +1,5 @@
 import QtQuick
 import QtQuick3D
-import QtQuick3D.Helpers
 import Polycut
 import Polycut.Render
 
@@ -101,27 +100,15 @@ Item {
         var dz = original.boundsMax.z - original.boundsMin.z;
         return Math.max(0.001, Math.sqrt(dx * dx + dy * dy + dz * dz) / 2);
     }
+    // Frame the one shared rig (ADR-0005) head-on: centre the pivot, zero the orbit,
+    // dolly back to hold the whole model. The only camera reset — run on a new model
+    // and on an up-axis change (#12); otherwise the viewpoint is continuous, including
+    // into and out of parts mode (afterCamera + partsCamera mirror this one).
     function _frame() {
         pivot.position = _center();
+        pivot.eulerRotation = Qt.vector3d(0, 0, 0);
         camera.z = _radius() * 3.2;  // pull back enough to hold the whole model
     }
-    // Reset to the default framed front view — used when the up-axis changes so the
-    // re-oriented model is shown head-on instead of from the previous orbit (#12).
-    function _resetView() {
-        pivot.position = _center();
-        camera.position = Qt.vector3d(0, 0, _radius() * 3.2);
-        camera.eulerRotation = Qt.vector3d(0, 0, 0);
-    }
-
-    // The parts view has its own independent camera rig (partsPivot + partsCamera),
-    // framed on entering parts mode — so parts orbit/pan/zoom never touch the main
-    // before/after camera, and switching modes can't corrupt the shaded view.
-    function _framePartsCam() {
-        partsPivot.position = _center();
-        partsPivot.eulerRotation = Qt.vector3d(0, 0, 0);
-        partsCamera.position = Qt.vector3d(0, 0, _radius() * 3.2);
-    }
-    onPartsModeChanged: if (partsMode) _framePartsCam()
 
     // ---- before side (original, full-res): solid + edge lines ----------
     View3D {
@@ -142,13 +129,16 @@ Item {
         DirectionalLight { eulerRotation: Qt.vector3d(-35, -45, 0); brightness: 1.0 }
         DirectionalLight { eulerRotation: Qt.vector3d(25, 130, 0); brightness: 0.45 }
 
+        // The one shared camera rig (ADR-0005): the input handler orbits `pivot`,
+        // pans by moving it, and zooms by dollying `camera.z`. Every render mode draws
+        // this viewpoint — afterCamera and the parts camera mirror it — so crossing
+        // between modes never resets the view.
         Node {
             id: pivot
             Node {
-                // A fixed camera dolly the OrbitCameraController never writes to (it
-                // owns `camera`'s own position/rotation). Shifting this by a sub-pixel
-                // epsilon on each cut (cutNudge) moves the camera in world space —
-                // restarting ProgressiveAA — without the orbit clobbering the nudge.
+                // A fixed dolly node the orbit/zoom never writes to. Shifting it by a
+                // sub-pixel epsilon on each cut (cutNudge) moves the camera in world
+                // space — restarting ProgressiveAA — without the orbit clobbering it.
                 x: root.cutNudge
                 PerspectiveCamera { id: camera; z: 6; clipNear: 0.01 + root.renderModeNudge }
             }
@@ -272,15 +262,17 @@ Item {
             antialiasingQuality: SceneEnvironment.High
         }
 
-        // Independent camera rig — its own pivot the right-drag orbits, with a nudge
-        // node (partsNudge) that shifts it a sub-pixel epsilon to restart ProgressiveAA
-        // when a carve recolours the buffer. Never touches the main before/after camera.
-        Node {
-            id: partsPivot
-            Node {
-                x: root.partsNudge
-                PerspectiveCamera { id: partsCamera; z: 6; clipNear: 0.01 }
-            }
+        // Mirror the one shared camera (ADR-0005): parts draws the same viewpoint as
+        // the before/after split, so switching into and out of parts mode never resets
+        // the view. partsNudge shifts it a sub-pixel epsilon to restart this view's
+        // ProgressiveAA when a carve recolours the buffer — without moving the others.
+        PerspectiveCamera {
+            id: partsCamera
+            position: Qt.vector3d(camera.scenePosition.x + root.partsNudge,
+                                  camera.scenePosition.y, camera.scenePosition.z)
+            rotation: camera.sceneRotation
+            fieldOfView: camera.fieldOfView
+            clipNear: camera.clipNear
         }
 
         Node {  // same render-time up-axis rotation as the before/after passes
@@ -303,33 +295,21 @@ Item {
         }
     }
 
-    // ---- one shared orbit controller drives the before camera -----------
-    // Disabled in parts mode, where the left button paints — the parts camera is
-    // driven by its own right-orbit / middle-pan / wheel-zoom handler below so tools
-    // own the left button and never fight the camera.
-    OrbitCameraController {
-        anchors.fill: parent
-        origin: pivot
-        camera: camera
-        enabled: !root.partsMode
-    }
-
-    // ---- Parts mode input: left paints, right orbits, middle pans, wheel zooms --
-    // Active only in parts mode (the OrbitCameraController is disabled there). The
-    // left button is the tool — click = wand/cluster, drag = brush — handing each
-    // stroke's pixel + camera to F's pick slot, which builds the core ray, resolves
-    // the face, and applies the active tool. The right/middle buttons + wheel drive
-    // the camera, so tools and navigation never share a button.
-    // NOTE: assumes the up-axis is "y" (Meshy's default) — the model node's render-
-    // time up rotation is then the identity, so the world ray matches the raw mesh
-    // the pick tests. Painting at up = x/z would be misaligned (a known follow-up).
+    // ---- the one viewport input handler (ADR-0005) ---------------------
+    // Drives the shared rig in every render mode: right-drag orbits `pivot`, middle
+    // pans it, the wheel dollies `camera`. The left button is reserved for the paint
+    // tool and is live only in parts mode — click = wand/cluster, drag = brush —
+    // handing each stroke's pixel + the shared camera to F's pick slot, which builds
+    // the core ray, resolves the face, and applies the active tool. Tools and
+    // navigation never share a button, so no second camera rig is needed.
+    // NOTE: painting assumes the up-axis is "y" (Meshy's default) — the model node's
+    // render-time up rotation is then the identity, so the world ray matches the raw
+    // mesh the pick tests. Painting at up = x/z would be misaligned (known follow-up).
     MouseArea {
-        id: partsInput
+        id: viewInput
         anchors.fill: parent
-        enabled: root.partsMode
-        visible: root.partsMode
         acceptedButtons: Qt.LeftButton | Qt.RightButton | Qt.MiddleButton
-        cursorShape: Qt.CrossCursor
+        cursorShape: root.partsMode ? Qt.CrossCursor : Qt.ArrowCursor
         property bool painting: false
         property real lastX: 0
         property real lastY: 0
@@ -347,26 +327,27 @@ Item {
             interval: 24  // ~40 fps stamp cap
             repeat: true
             running: false
-            onTriggered: if (partsInput.strokeDirty) {
-                partsInput.strokeDirty = false;
-                partsInput.paintAt(partsInput.pendingX, partsInput.pendingY);
+            onTriggered: if (viewInput.strokeDirty) {
+                viewInput.strokeDirty = false;
+                viewInput.paintAt(viewInput.pendingX, viewInput.pendingY);
             }
         }
 
         function paintAt(px, py) {
             processor.parts.pick(
                 px, py,
-                [partsCamera.scenePosition.x, partsCamera.scenePosition.y, partsCamera.scenePosition.z],
-                [partsCamera.forward.x, partsCamera.forward.y, partsCamera.forward.z],
-                [partsCamera.up.x, partsCamera.up.y, partsCamera.up.z],
-                partsCamera.fieldOfView,
+                [camera.scenePosition.x, camera.scenePosition.y, camera.scenePosition.z],
+                [camera.forward.x, camera.forward.y, camera.forward.z],
+                [camera.up.x, camera.up.y, camera.up.z],
+                camera.fieldOfView,
                 root.width, root.height);
         }
 
         onPressed: function(mouse) {
             lastX = mouse.x;
             lastY = mouse.y;
-            if (mouse.button === Qt.LeftButton) {
+            // Left paints — but only in parts mode; elsewhere the left button is inert.
+            if (mouse.button === Qt.LeftButton && root.partsMode) {
                 processor.parts.beginStroke();  // fresh stroke — don't bridge from the last
                 paintAt(mouse.x, mouse.y);
                 painting = processor.parts.activeTool === "brush";  // only the brush strokes
@@ -380,23 +361,21 @@ Item {
             var dx = mouse.x - lastX, dy = mouse.y - lastY;
             lastX = mouse.x;
             lastY = mouse.y;
-            if (mouse.buttons & Qt.LeftButton) {
-                if (painting) {  // record latest; the throttle paints it
-                    pendingX = mouse.x;
-                    pendingY = mouse.y;
-                    strokeDirty = true;
-                }
+            if (painting) {  // brush drag (parts mode, left held): throttle paints the latest
+                pendingX = mouse.x;
+                pendingY = mouse.y;
+                strokeDirty = true;
             } else if (mouse.buttons & Qt.RightButton) {  // orbit
-                var e = partsPivot.eulerRotation;
-                partsPivot.eulerRotation = Qt.vector3d(
+                var e = pivot.eulerRotation;
+                pivot.eulerRotation = Qt.vector3d(
                     Math.max(-89, Math.min(89, e.x - dy * 0.3)),  // pitch, clamped
                     e.y - dx * 0.3,                                // yaw
                     0);
             } else if (mouse.buttons & Qt.MiddleButton) {  // pan
-                var s = partsCamera.z * 0.0015;
-                partsPivot.position = partsPivot.position
-                    .plus(partsCamera.right.times(-dx * s))
-                    .plus(partsCamera.up.times(dy * s));
+                var s = camera.z * 0.0015;
+                pivot.position = pivot.position
+                    .plus(camera.right.times(-dx * s))
+                    .plus(camera.up.times(dy * s));
             }
         }
         onReleased: {
@@ -413,8 +392,8 @@ Item {
         WheelHandler {  // zoom — pull the camera dolly in / out along its view axis
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: function(event) {
-                partsCamera.z = Math.max(root._radius() * 0.2,
-                                         partsCamera.z - event.angleDelta.y * 0.0015 * partsCamera.z);
+                camera.z = Math.max(root._radius() * 0.2,
+                                    camera.z - event.angleDelta.y * 0.0015 * camera.z);
             }
         }
     }
@@ -569,20 +548,17 @@ Item {
         onSelected: function(mode) { root.viewMode = mode; }
     }
 
-    // Re-frame the camera each time a new original (model) arrives.
+    // Re-frame the one shared rig each time a new original (model) arrives.
     Connections {
         target: processor.originalMesh
-        function onChanged() {
-            root._frame();
-            if (root.partsMode) root._framePartsCam();
-        }
+        function onChanged() { root._frame(); }
     }
 
-    // Reset to a framed front view whenever the up-axis changes, so the re-oriented
-    // model is shown head-on rather than from the previous orbit (#12).
+    // Re-frame to a head-on front view whenever the up-axis changes, so the re-oriented
+    // model is shown framed rather than from the previous orbit (#12).
     Connections {
         target: processor
-        function onUpAxisChanged() { root._resetView(); }
+        function onUpAxisChanged() { root._frame(); }
     }
 
     // Force the after side to repaint when a fresh cut swaps in: shift the camera by
