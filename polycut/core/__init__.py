@@ -19,12 +19,19 @@ from polycut.core.picking import (
 from polycut.core.scale import scale_factor, scale_geometry
 from polycut.core.segment import face_colours, segment, split_by_colour
 from polycut.core.simplify import ModelSimplifier, PreserveOptions, simplify_model
-from polycut.core.viewport import MeshBuffers, build_mesh_buffers
+from polycut.core.viewport import (
+    MeshBuffers,
+    PartBuffers,
+    build_mesh_buffers,
+    build_part_buffers,
+    build_part_colours,
+)
 
 __all__ = [
     "ExportResult",
     "MeshBuffers",
     "ModelSimplifier",
+    "PartBuffers",
     "Part",
     "Partition",
     "PreserveOptions",
@@ -35,6 +42,8 @@ __all__ = [
     "UP_AXES",
     "add_to_part",
     "build_mesh_buffers",
+    "build_part_buffers",
+    "build_part_colours",
     "colour_wand",
     "export_collada",
     "face_colours",

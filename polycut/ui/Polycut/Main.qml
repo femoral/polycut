@@ -168,7 +168,7 @@ ApplicationWindow {
                     RowLayout {
                         Layout.fillWidth: true
                         Text {
-                            text: "SCENE OUTLINER"
+                            text: "PARTS"
                             color: Theme.fg2
                             font.family: Theme.fontUi
                             font.pixelSize: Theme.fontSmall
@@ -177,25 +177,27 @@ ApplicationWindow {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            // running total = the model's composition (original faces),
-                            // matching the per-row counts; the live cut is the hero stat.
-                            text: processor.hasModel ? win.fmt(processor.originalFaceCount) : "0"
+                            // running total = the partitioned (simplified) mesh, which the
+                            // per-Part counts sum to exactly; the live cut is the hero stat.
+                            text: processor.hasModel ? win.fmt(processor.parts.totalFaceCount) : "0"
                             color: Theme.fg1
                             font.family: Theme.fontMono
                             font.pixelSize: Theme.fontSmall
                         }
                     }
 
-                    // object rows — one per object in the loaded file (#11). Selecting
-                    // a row highlights it in the viewport. List-row pattern (§6): name +
-                    // right-aligned mono face count; selected = teal left-accent + bg-2.
+                    // Part rows — one per Part (incl. the Unassigned remainder), bound to
+                    // the view-model (#26). List-row pattern (§6): colour swatch + name +
+                    // right-aligned mono face count + a visibility (eye) toggle; the active
+                    // edit target gets the teal left-accent + bg-2. Selecting a row makes it
+                    // active (drives the viewport highlight + where tool strokes land).
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         visible: processor.hasModel
                         clip: true
                         spacing: Theme.gapXs
-                        model: processor.outlinerObjects
+                        model: processor.parts.partsRows
                         boundsBehavior: Flickable.StopAtBounds
                         delegate: Rectangle {
                             required property int index
@@ -203,22 +205,39 @@ ApplicationWindow {
                             width: ListView.view.width
                             implicitHeight: Theme.rowHeight
                             radius: Theme.rSm
-                            readonly property bool selected: index === processor.selectedObjectIndex
+                            readonly property bool selected: modelData.id === processor.parts.activePartId
                             color: selected ? Theme.bg2 : Theme.transparent
-                            Rectangle {  // teal left-accent on the selected row
+                            Rectangle {  // teal left-accent on the active row
                                 width: Theme.borderThick
                                 height: parent.height
                                 radius: Theme.borderThin
                                 color: Theme.teal
                                 visible: parent.selected
                             }
+                            MouseArea {  // row select — under the eye toggle, which sits on top
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: processor.parts.activePartId = modelData.id
+                            }
                             RowLayout {
                                 anchors.fill: parent
                                 anchors.leftMargin: Theme.gap
                                 anchors.rightMargin: Theme.gap
+                                spacing: Theme.gapXs
+                                Rectangle {  // colour swatch (dims when hidden)
+                                    implicitWidth: Theme.dotSize + Theme.gapXs
+                                    implicitHeight: Theme.dotSize + Theme.gapXs
+                                    radius: Theme.rSm
+                                    color: Qt.rgba(modelData.colour[0] / 255,
+                                                   modelData.colour[1] / 255,
+                                                   modelData.colour[2] / 255, 1)
+                                    border.color: Theme.hairline
+                                    border.width: Theme.borderThin
+                                    opacity: modelData.visible ? 1.0 : 0.35
+                                }
                                 Text {
                                     text: modelData.name
-                                    color: Theme.fg0
+                                    color: modelData.visible ? Theme.fg0 : Theme.fg3
                                     font.family: Theme.fontUi
                                     font.pixelSize: Theme.fontBase
                                     elide: Text.ElideRight
@@ -230,18 +249,26 @@ ApplicationWindow {
                                     font.family: Theme.fontMono
                                     font.pixelSize: Theme.fontSmall
                                 }
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: processor.selectedObjectIndex = index
+                                Text {  // eye toggle — show / hide the Part in the flat-colour view
+                                    text: modelData.visible ? "◉" : "○"
+                                    color: modelData.visible ? Theme.fg2 : Theme.fg3
+                                    font.family: Theme.fontUi
+                                    font.pixelSize: Theme.fontBase
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        anchors.margins: -Theme.gapXs  // easier hit target
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: processor.parts.setPartVisible(
+                                            modelData.id, !modelData.visible)
+                                    }
+                                }
                             }
                         }
                     }
 
                     Text {
                         visible: !processor.hasModel
-                        text: "no objects yet"
+                        text: "no parts yet"
                         color: Theme.fg3
                         font.family: Theme.fontUi
                         font.pixelSize: Theme.fontSmall
@@ -351,6 +378,17 @@ ApplicationWindow {
                                 Layout.fillWidth: true
                             }
                         }
+
+                        // Parts — manual carve workbench: tool picker + params +
+                        // the active Part's swatch / rename / slot / add-delete. The
+                        // flat-colour "parts" view mode shows the result. (#26)
+                        // Sits after Transform until a Materials section ships; at that
+                        // point Materials takes the canonical §2 slot and Parts moves
+                        // below it (tracked with the inspector reorg, see #26 discussion).
+                        PartsPanel {
+                            visible: processor.hasModel
+                            Layout.fillWidth: true
+                        }
                     }
                 }
             }
@@ -380,9 +418,15 @@ ApplicationWindow {
                     font.family: Theme.fontUi
                     font.pixelSize: Theme.fontSmall
                 }
-                Text {  // selection narration (§7): selected: <object>
-                    visible: processor.selectedObjectName !== ""
-                    text: "· selected: " + processor.selectedObjectName
+                Text {  // selection narration (§7): the active Part edit target
+                    visible: processor.hasModel
+                    text: {
+                        var rows = processor.parts.partsRows;
+                        var id = processor.parts.activePartId;
+                        for (var i = 0; i < rows.length; i++)
+                            if (rows[i].id === id) return "· active: " + rows[i].name;
+                        return "";
+                    }
                     color: Theme.fg3
                     font.family: Theme.fontUi
                     font.pixelSize: Theme.fontSmall

@@ -5,6 +5,7 @@ Section Section.qml
 SimplifyPanel SimplifyPanel.qml
 TransformPanel TransformPanel.qml
 PreservePanel PreservePanel.qml
+PartsPanel PartsPanel.qml
 Toggle Toggle.qml
 UnitSelect UnitSelect.qml
 EmptyState EmptyState.qml

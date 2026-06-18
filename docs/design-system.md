@@ -72,7 +72,8 @@ Alt accent themes exist in the prototype (green hue 155, purple hue 320). Defaul
 
 ## 6. Component patterns
 
-- **Pill toggle** — rounded switch, `teal` when on, `bg-3` track when off; spring ease on flip.
+- **Pill toggle** — rounded switch, `teal` when on, `bg-3` track when off; spring ease on flip. Use when the toggle is the row's primary control.
+- **Icon toggle** — a single glyph standing in for a binary state inside a dense list row, where a pill would crowd the row (e.g. the outliner Part visibility eye: `◉` shown / `○` hidden, `fg-2` on / `fg-3` off). Glyph + click target only; no track. Reserve for ≤34px rows; prefer the pill toggle elsewhere.
 - **Slider + badge** — horizontal track (filled portion `teal`), round handle; a live value **badge** (e.g. `−75%`) pinned near it in mono.
 - **Stepper** — labeled center value with prev/next/min/max controls (used for LOD/presets).
 - **Chips / tags** — small uppercase mono pills: format chips (`OBJ`), type tags (`MESH`), the reduction badge.

@@ -45,3 +45,21 @@ def test_main_qml_loads_without_errors():
         assert not messages, "QML warnings:\n" + "\n".join(messages)
     finally:
         qInstallMessageHandler(None)
+
+
+def test_parts_workbench_surface_is_present():
+    """The Parts workbench (slice G) is wired into the shell: the right-panel Parts
+    section and the flat-colour 'parts' view-mode pass are both instantiated — so a
+    later edit can't silently drop the Parts UI. Both load even before a model does."""
+    from PySide6.QtCore import QObject
+    from PySide6.QtGui import QGuiApplication
+
+    from polycut.app import create_engine
+
+    app = QGuiApplication.instance() or QGuiApplication([])
+    engine = create_engine(app)
+    app.processEvents()
+
+    root = engine.rootObjects()[0]
+    assert root.findChild(QObject, "partsPanel") is not None  # right-panel tools
+    assert root.findChild(QObject, "partsView") is not None  # flat-colour viewport pass

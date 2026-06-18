@@ -42,6 +42,20 @@ def test_setting_the_current_mode_again_is_a_no_op():
     assert emits == []
 
 
+def test_parts_is_an_accepted_mode():
+    """The Parts workbench adds a flat-colour 'parts' view alongside the three
+    shading modes — selecting it lands on the property and notifies so QML draws
+    each face in its Part's colour."""
+    proc = Processor()
+    emits = []
+    proc.renderModeChanged.connect(lambda: emits.append(proc.renderMode))
+
+    proc.renderMode = "parts"
+
+    assert proc.renderMode == "parts"
+    assert emits == ["parts"]
+
+
 def test_an_unknown_mode_is_rejected():
     """Only the three real modes are accepted; a stray value leaves the viewport
     on its current mode rather than rendering nothing."""

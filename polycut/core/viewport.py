@@ -14,6 +14,11 @@ from dataclasses import dataclass
 import numpy as np
 import trimesh
 
+from polycut.core.parts import UNASSIGNED_COLOUR, UNASSIGNED_ID
+
+# How far the active Part's colour is pushed toward white as the selection highlight.
+_HIGHLIGHT = 0.4
+
 
 @dataclass(frozen=True)
 class MeshBuffers:
@@ -71,6 +76,77 @@ def build_mesh_buffers(model) -> MeshBuffers:
         bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
         bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
     )
+
+
+@dataclass(frozen=True)
+class PartBuffers:
+    """GPU buffers for the flat-colour Parts view.
+
+    ``vertex_data`` interleaves position (3 floats) + Part RGBA (4 floats) per
+    vertex — no normals/UVs, since the view is flat and unlit. Shares the mesh's
+    triangle indices.
+    """
+
+    vertex_count: int
+    triangle_count: int
+    vertex_data: bytes
+    index_data: bytes
+    stride: int
+    bounds_min: tuple[float, float, float]
+    bounds_max: tuple[float, float, float]
+
+
+def build_part_buffers(mesh, partition, active_id: int = UNASSIGNED_ID) -> PartBuffers:
+    """Build the flat-colour Parts buffers for ``mesh`` under ``partition``.
+
+    Positions come straight from the (simplified) mesh — the exact geometry the
+    exporter writes — interleaved with each vertex's Part colour
+    (:func:`build_part_colours`), with ``active_id`` brightened as the selection
+    highlight. Re-run whenever a carve or the selection changes.
+    """
+    positions = np.asarray(mesh.vertices, dtype=np.float32)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    colours = build_part_colours(partition, faces, len(positions), active_id)
+    interleaved = np.ascontiguousarray(np.hstack([positions, colours]), dtype=np.float32)
+    indices = np.ascontiguousarray(np.asarray(mesh.faces, dtype=np.uint32))
+    lo = positions.min(axis=0)
+    hi = positions.max(axis=0)
+    return PartBuffers(
+        vertex_count=len(positions),
+        triangle_count=int(faces.shape[0]),
+        vertex_data=interleaved.tobytes(),
+        index_data=indices.tobytes(),
+        stride=interleaved.shape[1] * 4,
+        bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
+        bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+    )
+
+
+def build_part_colours(
+    partition, faces: np.ndarray, vertex_count: int, active_id: int = UNASSIGNED_ID
+) -> np.ndarray:
+    """Per-vertex RGBA (float32, 0–1) painting each face in its Part's colour.
+
+    The flat-colour Parts view reuses the existing indexed vertex buffer, so the
+    colour is per-vertex: every face scatters its Part's swatch colour onto its
+    three vertices. Faces still in Unassigned take the neutral remainder grey. A
+    hidden Part drops to zero alpha (the view discards it); the ``active_id`` Part,
+    when a real Part is selected, brightens toward white as the selection highlight.
+    """
+    faces = np.asarray(faces, dtype=np.int64)
+    labels = np.asarray(partition.labels)
+    colours = np.empty((vertex_count, 4), dtype=np.float32)
+    colours[:, :3] = np.asarray(UNASSIGNED_COLOUR, dtype=np.float32) / 255.0
+    colours[:, 3] = 1.0
+    for part in partition.parts:
+        rgb = np.asarray(part.colour, dtype=np.float32) / 255.0
+        verts = np.unique(faces[labels == part.id])  # vertices the Part's faces touch
+        colours[verts, :3] = rgb
+        colours[verts, 3] = 1.0 if part.visible else 0.0  # hidden Part → blend away
+    if active_id != UNASSIGNED_ID and active_id in {p.id for p in partition.parts}:
+        verts = np.unique(faces[labels == active_id])
+        colours[verts, :3] += (1.0 - colours[verts, :3]) * _HIGHLIGHT
+    return colours
 
 
 def _fuse_scene(scene: "trimesh.Scene"):

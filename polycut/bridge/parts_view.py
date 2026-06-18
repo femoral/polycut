@@ -20,12 +20,15 @@ object only marshals and notifies.
 
 from __future__ import annotations
 
-from PySide6.QtCore import Property, QObject, Signal, Slot
+import numpy as np
+from PySide6.QtCore import Property, QByteArray, QObject, Signal, Slot
+from PySide6.QtGui import QVector3D
 
 from polycut.core.brush import SpatialBrush
 from polycut.core.parts import UNASSIGNED_ID, Partition
 from polycut.core.picking import add_to_part, colour_wand, pick_face, screen_ray
 from polycut.core.segment import split_by_colour
+from polycut.core.viewport import build_part_buffers
 
 TOOLS = ("cluster", "wand", "brush")  # auto-split, magic wand, spatial brush
 
@@ -36,6 +39,7 @@ class PartsViewModel(QObject):
     activeToolChanged = Signal()  # cluster / wand / brush switched
     toolParamsChanged = Signal()  # K / threshold / global / radius moved
     highlightChanged = Signal()  # the active Part's face set (the viewport overlay) moved
+    geometryChanged = Signal()  # the flat-colour Parts buffer moved (a carve / visibility)
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -43,6 +47,8 @@ class PartsViewModel(QObject):
         self._texture = None
         self._partition: Partition | None = None
         self._brush: SpatialBrush | None = None  # centroid KD-tree, rebuilt per mesh
+        self._buffers = None  # cached flat-colour Parts buffer; rebuilt lazily on carve
+        self._last_brush_point = None  # previous brush hit in a drag, for stroke fill-in
         self._active_part = UNASSIGNED_ID  # edits target the remainder until a Part exists
         self._active_tool = "cluster"  # the first manual tool in the panel
         self._cluster_k = 2  # split_by_colour's default
@@ -59,20 +65,39 @@ class PartsViewModel(QObject):
         self._partition = Partition.fresh(face_count=len(mesh.faces))
         self._brush = SpatialBrush(mesh)  # built once per cut; brush drags reuse it
         self._active_part = UNASSIGNED_ID
+        self._invalidate_geometry()
         self.partsChanged.emit()
         self.activePartChanged.emit()
         self.highlightChanged.emit()
 
     @Slot(result=int)
     def createPart(self) -> int:
-        """Add an empty Part, make it the active edit target, and return its id."""
+        """Add an empty Part, make it the active edit target, and return its id.
+        A no-op (``-1``) before a mesh is bound — nothing to carve yet."""
+        if self._partition is None:
+            return -1
         user_parts = sum(1 for p in self._partition.parts if p.id != UNASSIGNED_ID)
         part_id = self._partition.create_part(name=f"Part {user_parts + 1}")
         self._active_part = part_id
+        self._invalidate_geometry()  # the new Part becomes the highlighted target
         self.partsChanged.emit()
         self.activePartChanged.emit()
         self.highlightChanged.emit()
         return part_id
+
+    @Slot()
+    def deletePart(self) -> None:
+        """Delete the active Part, folding its faces back into Unassigned and
+        resetting the edit target to the remainder. A no-op when Unassigned is active
+        — the remainder is permanent and can never be dropped."""
+        if self._partition is None or self._active_part == UNASSIGNED_ID:
+            return
+        self._partition.delete(self._active_part)
+        self._active_part = UNASSIGNED_ID
+        self._invalidate_geometry()
+        self.partsChanged.emit()
+        self.activePartChanged.emit()
+        self.highlightChanged.emit()
 
     # ---- active Part + its highlight -----------------------------------
     def _get_active_part(self) -> int:
@@ -85,6 +110,7 @@ class PartsViewModel(QObject):
         if value not in {p.id for p in self._partition.parts}:
             return  # only existing Parts are selectable
         self._active_part = value
+        self._invalidate_geometry()  # the selection highlight follows the active Part
         self.activePartChanged.emit()
         self.highlightChanged.emit()
 
@@ -108,6 +134,7 @@ class PartsViewModel(QObject):
     def setPartVisible(self, part_id: int, visible: bool) -> None:
         """Show or hide a Part, leaving its face ownership untouched."""
         self._partition.set_visible(int(part_id), bool(visible))
+        self._invalidate_geometry()  # hidden Parts blend away in the flat-colour view
         self.partsChanged.emit()
 
     # ---- active tool + params ------------------------------------------
@@ -166,6 +193,12 @@ class PartsViewModel(QObject):
     brushRadius = Property(float, _get_brush_radius, _set_brush_radius, notify=toolParamsChanged)
 
     # ---- pick + apply the active tool ----------------------------------
+    @Slot()
+    def beginStroke(self) -> None:
+        """Start a fresh brush stroke — the next brush pick stamps a single point
+        rather than sweeping from the previous stroke's end."""
+        self._last_brush_point = None
+
     @Slot(float, float, "QVariantList", "QVariantList", "QVariantList", float, float, float, result=int)
     def pick(self, x, y, cam_pos, forward, up, fov_y, width, height) -> int:
         """Resolve the face under a screen click and apply the active tool there.
@@ -182,6 +215,7 @@ class PartsViewModel(QObject):
         if face is None:
             return -1
         self._apply_tool(int(face))
+        self._invalidate_geometry()  # the flat-colour buffer follows the carve
         self.partsChanged.emit()
         self.highlightChanged.emit()  # the active Part's face set may have grown/shrunk
         return int(face)
@@ -192,7 +226,8 @@ class PartsViewModel(QObject):
         partition, mesh, texture = self._partition, self._mesh, self._texture
         if self._active_tool == "brush":
             hit = mesh.triangles_center[face]
-            self._brush.paint(partition, [hit], self._brush_radius, self._active_part)
+            self._brush.paint(partition, self._stroke_points(hit), self._brush_radius, self._active_part)
+            self._last_brush_point = hit
         elif self._active_tool == "wand":
             mode = "global" if self._wand_global else "local"
             faces = colour_wand(mesh, texture, seed=face, threshold=self._wand_threshold, mode=mode)
@@ -200,6 +235,20 @@ class PartsViewModel(QObject):
         else:  # cluster — subdivide the Part the picked face belongs to
             scope = int(partition.labels[face])
             split_by_colour(partition, mesh, texture, k=self._cluster_k, scope=scope)
+
+    def _stroke_points(self, hit):
+        """Brush samples from the previous hit to ``hit``, so a fast drag paints a
+        continuous tube instead of isolated stamps. The first stamp of a stroke (no
+        previous point, or no radius set) is just the hit itself; otherwise the
+        segment is densified to roughly half-radius steps (capped, so a long stroke
+        can't explode the stamp count)."""
+        prev = self._last_brush_point
+        if prev is None or self._brush_radius <= 0:
+            return [hit]
+        segment = hit - prev
+        distance = float(np.linalg.norm(segment))
+        steps = min(256, max(1, int(distance / (self._brush_radius * 0.5))))
+        return [prev + segment * (i / steps) for i in range(1, steps + 1)]
 
     # ---- outliner rows -------------------------------------------------
     def _get_parts_rows(self) -> list:
@@ -212,6 +261,7 @@ class PartsViewModel(QObject):
                 "colour": list(p.colour),
                 "faceCount": self._partition.face_count(p.id),
                 "visible": p.visible,
+                "slot": p.material_slot,
             }
             for p in self._partition.parts
         ]
@@ -229,3 +279,52 @@ class PartsViewModel(QObject):
         return self._partition is not None and len(self._partition.parts) > 1
 
     hasParts = Property(bool, _get_has_parts, notify=partsChanged)
+
+    # ---- flat-colour Parts geometry (the "parts" view mode) ------------
+    # The viewport's flat-colour mode draws the simplified mesh with each face in
+    # its Part's swatch colour. The buffer (positions + per-vertex RGBA) is built in
+    # ``core`` and cached here, rebuilt lazily the next time QML reads it after a
+    # carve / visibility change — so a brush drag invalidates once, not per query.
+    def _invalidate_geometry(self) -> None:
+        self._buffers = None
+        self.geometryChanged.emit()
+
+    def _ensure_geometry(self):
+        if self._buffers is None and self._mesh is not None and self._partition is not None:
+            self._buffers = build_part_buffers(self._mesh, self._partition, self._active_part)
+        return self._buffers
+
+    def _get_geometry_ready(self) -> bool:
+        return self._ensure_geometry() is not None
+
+    geometryReady = Property(bool, _get_geometry_ready, notify=geometryChanged)
+
+    def _get_geometry_stride(self) -> int:
+        buffers = self._ensure_geometry()
+        return buffers.stride if buffers else 0
+
+    geometryStride = Property(int, _get_geometry_stride, notify=geometryChanged)
+
+    def _get_geometry_bounds_min(self) -> QVector3D:
+        buffers = self._ensure_geometry()
+        return QVector3D(*buffers.bounds_min) if buffers else QVector3D()
+
+    geometryBoundsMin = Property(QVector3D, _get_geometry_bounds_min, notify=geometryChanged)
+
+    def _get_geometry_bounds_max(self) -> QVector3D:
+        buffers = self._ensure_geometry()
+        return QVector3D(*buffers.bounds_max) if buffers else QVector3D()
+
+    geometryBoundsMax = Property(QVector3D, _get_geometry_bounds_max, notify=geometryChanged)
+
+    @Slot(result=QByteArray)
+    def geometryVertexData(self) -> QByteArray:
+        """The interleaved position + RGBA buffer the Parts geometry uploads."""
+        buffers = self._ensure_geometry()
+        return QByteArray(buffers.vertex_data) if buffers else QByteArray()
+
+    @Slot(result=QByteArray)
+    def geometryIndexData(self) -> QByteArray:
+        """The triangle index buffer the Parts geometry uploads."""
+        buffers = self._ensure_geometry()
+        return QByteArray(buffers.index_data) if buffers else QByteArray()

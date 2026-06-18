@@ -86,10 +86,51 @@ def test_rebinding_exposes_a_fresh_partition_of_one_unassigned_row():
     vm.rebind(mesh, texture)
 
     assert vm.partsRows == [
-        {"id": 0, "name": "Unassigned", "colour": [130, 130, 130], "faceCount": 6, "visible": True}
+        {"id": 0, "name": "Unassigned", "colour": [130, 130, 130],
+         "faceCount": 6, "visible": True, "slot": "unassigned"}
     ]
     assert vm.totalFaceCount == 6
     assert vm.hasParts is False  # only the permanent remainder; nothing carved yet
+
+
+def test_rows_expose_each_parts_material_slot():
+    """Each row carries its Part's material slot — the name the export maps to a
+    SketchUp material — so the panel can show the active Part's slot and the
+    outliner/Materials view can address it. Slots are distinct per Part."""
+    mesh, texture, _ = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    wood = vm.createPart()
+
+    rows = {r["id"]: r for r in vm.partsRows}
+    assert rows[0]["slot"]  # the remainder carries a slot
+    assert rows[wood]["slot"]  # the new Part carries one
+    assert rows[wood]["slot"] != rows[0]["slot"]  # distinct per Part
+
+
+def test_deleting_the_active_part_returns_its_faces_and_resets_the_target():
+    """Deleting the active Part folds its faces back into Unassigned, drops the row,
+    and resets the edit target to the remainder — the panel's delete action. Deleting
+    when Unassigned is active is a no-op (the remainder is permanent)."""
+    mesh, texture, centers = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    wood = vm.createPart()
+    vm.activeTool = "wand"
+    vm.wandGlobal = True
+    vm.wandThreshold = 10.0
+    _click(vm, centers[0])  # paint the two BROWN faces into wood
+    assert vm.hasParts is True
+
+    vm.deletePart()
+
+    assert vm.hasParts is False  # back to just the remainder
+    assert [r["name"] for r in vm.partsRows] == ["Unassigned"]
+    assert vm.activePartId == 0  # edit target reset to Unassigned
+    assert {r["id"]: r for r in vm.partsRows}[0]["faceCount"] == 3  # faces returned
+
+    vm.deletePart()  # Unassigned active now — no-op, never drops the remainder
+    assert [r["name"] for r in vm.partsRows] == ["Unassigned"]
 
 
 def test_creating_a_part_adds_a_row_and_makes_it_active():

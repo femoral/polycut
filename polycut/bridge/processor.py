@@ -35,7 +35,7 @@ from polycut.core.scale import UNIT_METERS, UNIT_NAMES, detect_source_unit
 
 DEFAULT_REDUCTION = 0.25  # keep ~25% of faces — the −75% default applied on load
 MIN_FACES = 100  # floor so the slider can't collapse the mesh to nothing
-RENDER_MODES = ("shaded", "edges", "wireframe")  # viewport shading modes (#9)
+RENDER_MODES = ("shaded", "edges", "wireframe", "parts")  # viewport modes (#9, +Parts #26)
 # Simplify presets / LOD ladder (#14): (label, reduction fraction). Descending
 # detail — Full keeps every face, each step reduces harder. Balanced == the −75%
 # DEFAULT_REDUCTION, so a freshly-loaded model already sits on it; Min (−95%) lines

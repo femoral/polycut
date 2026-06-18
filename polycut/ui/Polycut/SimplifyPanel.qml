@@ -71,6 +71,32 @@ ColumnLayout {
         }
     }
 
+    // ---- re-cut warning: a new cut discards the carved Parts -------------
+    // Re-simplifying rebinds the Parts to the fresh mesh, dropping every carve (the
+    // labels indexed the old face set). Warn inline (coral, §7) when Parts exist —
+    // non-blocking: the cut still runs, the user just knows what it costs.
+    RowLayout {
+        visible: processor.parts.hasParts
+        Layout.fillWidth: true
+        spacing: Theme.gap
+
+        Rectangle {
+            implicitWidth: Theme.dotSize
+            implicitHeight: Theme.dotSize
+            radius: width / 2
+            color: Theme.coral
+        }
+        Text {
+            readonly property int partCount: processor.parts.partsRows.length - 1  // less Unassigned
+            text: "re-cutting clears your " + partCount + (partCount === 1 ? " part" : " parts")
+            color: Theme.coral
+            font.family: Theme.fontUi
+            font.pixelSize: Theme.fontSmall
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
+    }
+
     // ---- SIMPLIFY section -----------------------------------------------
     Section {
         title: "simplify"
