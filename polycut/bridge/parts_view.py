@@ -30,7 +30,7 @@ from polycut.core.brush import SpatialBrush
 from polycut.core.parts import UNASSIGNED_ID, Partition
 from polycut.core.picking import add_to_part, colour_wand, pick_face, screen_ray
 from polycut.core.segment import apply_clusters, colour_clusters
-from polycut.core.viewport import build_highlight_buffers, build_part_buffers
+from polycut.core.viewport import build_highlight_buffers, build_part_buffers, build_part_chunks
 
 TOOLS = ("cluster", "wand", "brush")  # auto-split, magic wand, spatial brush
 
@@ -58,6 +58,7 @@ class PartsViewModel(QObject):
         self._brush: SpatialBrush | None = None  # centroid KD-tree, rebuilt per mesh
         self._buffers = None  # cached flat-colour Parts buffer; rebuilt lazily on carve
         self._highlight_buffers = None  # cached active-Part outline; rebuilt with the highlight
+        self._chunks = None  # cached per-Part explode chunks; rebuilt once per carve
         self._last_brush_point = None  # previous brush hit in a drag, for stroke fill-in
         self._active_part = UNASSIGNED_ID  # edits target the remainder until a Part exists
         self._active_tool = "cluster"  # the first manual tool in the panel
@@ -363,6 +364,7 @@ class PartsViewModel(QObject):
     def _invalidate_geometry(self) -> None:
         self._buffers = None
         self._highlight_buffers = None  # the outline follows the same carves/selection
+        self._chunks = None  # the explode chunks are rebuilt on the next carve
         self.geometryChanged.emit()
 
     def _ensure_geometry(self):
@@ -450,3 +452,60 @@ class PartsViewModel(QObject):
         """The active Part's edge-index buffer (low→high pairs) for the Lines pass."""
         buffers = self._ensure_highlight()
         return QByteArray(buffers.index_data) if buffers else QByteArray()
+
+    # ---- per-Part explode chunks (#31) ---------------------------------
+    # The momentary explode draws the simplified mesh as one node per Part, each
+    # translated by its radial offset × the live amount. The chunks are built once per
+    # carve and cached (no per-tick buffer re-upload); the viewport reads them by index
+    # through a Repeater3D. Each chunk reuses the fused normals/UVs, so it shades and
+    # textures exactly like the assembled mesh in every render mode.
+    def _ensure_chunks(self) -> list:
+        if self._chunks is None and self._mesh is not None and self._partition is not None:
+            self._chunks = build_part_chunks(self._mesh, self._partition)
+        return self._chunks or []
+
+    def _get_chunk_count(self) -> int:
+        return len(self._ensure_chunks())
+
+    chunkCount = Property(int, _get_chunk_count, notify=geometryChanged)
+
+    @Slot(int, result=int)
+    def chunkPartId(self, index: int) -> int:
+        return int(self._ensure_chunks()[index].part_id)
+
+    @Slot(int, result=QVector3D)
+    def chunkOffset(self, index: int) -> QVector3D:
+        """The chunk's radial spread direction; the viewport scales it by ``amount``."""
+        return QVector3D(*self._ensure_chunks()[index].offset)
+
+    @Slot(int, result="QVariantList")
+    def chunkColour(self, index: int) -> list:
+        """The chunk's Part swatch RGB — the flat colour the parts render mode draws."""
+        return [int(c) for c in self._ensure_chunks()[index].colour]
+
+    @Slot(int, result=int)
+    def chunkStride(self, index: int) -> int:
+        return self._ensure_chunks()[index].stride
+
+    @Slot(int, result=QVector3D)
+    def chunkBoundsMin(self, index: int) -> QVector3D:
+        return QVector3D(*self._ensure_chunks()[index].bounds_min)
+
+    @Slot(int, result=QVector3D)
+    def chunkBoundsMax(self, index: int) -> QVector3D:
+        return QVector3D(*self._ensure_chunks()[index].bounds_max)
+
+    @Slot(int, result=QByteArray)
+    def chunkVertexData(self, index: int) -> QByteArray:
+        """The chunk's interleaved position/normal/UV buffer (gathered, fused-quality)."""
+        return QByteArray(self._ensure_chunks()[index].vertex_data)
+
+    @Slot(int, result=QByteArray)
+    def chunkTriangleData(self, index: int) -> QByteArray:
+        """The chunk's remapped triangle index buffer."""
+        return QByteArray(self._ensure_chunks()[index].index_data)
+
+    @Slot(int, result=QByteArray)
+    def chunkLineData(self, index: int) -> QByteArray:
+        """The chunk's remapped unique-edge buffer, for the edges / wireframe pass."""
+        return QByteArray(self._ensure_chunks()[index].line_index_data)

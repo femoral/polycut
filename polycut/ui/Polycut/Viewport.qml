@@ -14,6 +14,7 @@ import Polycut.Render
 Item {
     id: root
     objectName: "viewport"
+    focus: true  // hold keyboard focus so hold-Space (Explode, #31) reaches the handler
 
     readonly property var original: processor.originalMesh
     readonly property var simplified: processor.simplifiedMesh
@@ -82,6 +83,45 @@ Item {
     property real cutNudge: 0
     // The same AA-restart trick for the parts view's own camera (see its Connections).
     property real partsNudge: 0
+
+    // ---- Explode (#31): momentary, view-only spread of the Parts --------
+    // Holding Space fans each Part radially out from the model centroid by its chunk
+    // offset × amount (Unassigned anchored); the wheel sets amount while held; release
+    // re-assembles. Both transitions animate. Never touches the export — this is a
+    // pure node-transform spread of cached per-Part chunks, the fused base hidden
+    // meanwhile. Holding also force-switches the framing to `simplified` (restored on
+    // release); in parts mode it just explodes (the framing toggle is hidden there).
+    property bool exploding: false
+    property real explodeAmount: 0
+    readonly property bool explodeActive: exploding || explodeAmount > 0.0001
+    property string _framingBeforeExplode: "split"
+    Behavior on explodeAmount {
+        NumberAnimation {
+            duration: Theme.durStandard
+            easing.type: Easing.BezierSpline
+            easing.bezierCurve: Theme.easeStandard
+        }
+    }
+
+    Keys.onPressed: function(event) {
+        if (event.key === Qt.Key_Space && !event.isAutoRepeat) {
+            if (!root.partsMode) {  // force `simplified` framing for the duration
+                root._framingBeforeExplode = root.viewMode;
+                root.viewMode = "simplified";
+            }
+            root.exploding = true;
+            root.explodeAmount = 1.0;  // a sensible default — visible at once
+            event.accepted = true;
+        }
+    }
+    Keys.onReleased: function(event) {
+        if (event.key === Qt.Key_Space && !event.isAutoRepeat) {
+            root.exploding = false;
+            root.explodeAmount = 0;  // animate the Parts back together
+            if (!root.partsMode) root.viewMode = root._framingBeforeExplode;
+            event.accepted = true;
+        }
+    }
 
     // Outliner selection is reflected in the left panel (row accent) and the status
     // bar — not in the 3D view. A whole-mesh tint can't isolate one object in the
@@ -221,8 +261,9 @@ Item {
                     pivot: root.modelCenter
                     eulerRotation: root.upEuler
 
-                    Model {  // the shaded solid
+                    Model {  // the shaded solid — hidden while the Parts are exploded
                         visible: root.afterMesh && root.afterMesh.hasMesh && root.showFill
+                                 && !root.explodeActive
                         geometry: MeshGeometry { meshView: root.afterMesh }
                         materials: PrincipledMaterial {
                             baseColor: Theme.fg1
@@ -232,6 +273,7 @@ Item {
                     }
                     Model {  // edges / wireframe lines, depth-tested against the solid
                         visible: root.afterMesh && root.afterMesh.hasMesh && root.showWire
+                                 && !root.explodeActive
                         depthBias: root.lineDepthBias
                         geometry: MeshGeometry { meshView: root.afterMesh; topology: "lines" }
                         materials: PrincipledMaterial {
@@ -244,12 +286,44 @@ Item {
                              // Shown in shaded / edges / wireframe; parts mode (the after
                              // side is hidden there) keeps its own brighten-toward-white.
                         visible: root.afterMesh && root.afterMesh.hasMesh
-                                 && processor.parts.hasHighlight
+                                 && processor.parts.hasHighlight && !root.explodeActive
                         depthBias: root.lineDepthBias
                         geometry: HighlightGeometry { partsModel: processor.parts }
                         materials: PrincipledMaterial {
                             baseColor: Theme.teal
                             lighting: PrincipledMaterial.NoLighting
+                        }
+                    }
+                    // Explode (#31): one node per Part, translated by its cached offset ×
+                    // amount, replacing the fused base while Space is held. Each chunk draws
+                    // its fill + topology lines so it reads in shaded / edges / wireframe.
+                    Repeater3D {
+                        model: root.explodeActive ? processor.parts.chunkCount : 0
+                        delegate: Node {
+                            required property int index
+                            position: processor.parts.chunkOffset(index).times(root.explodeAmount)
+                            Model {  // chunk fill
+                                visible: root.showFill
+                                geometry: ExplodeChunkGeometry {
+                                    partsModel: processor.parts; chunkIndex: index; topology: "triangles"
+                                }
+                                materials: PrincipledMaterial {
+                                    baseColor: Theme.fg1
+                                    baseColorMap: root.textured ? afterTexture : null
+                                    roughness: 0.85
+                                }
+                            }
+                            Model {  // chunk edges / wireframe lines
+                                visible: root.showWire
+                                depthBias: root.lineDepthBias
+                                geometry: ExplodeChunkGeometry {
+                                    partsModel: processor.parts; chunkIndex: index; topology: "lines"
+                                }
+                                materials: PrincipledMaterial {
+                                    baseColor: Theme.fg2
+                                    lighting: PrincipledMaterial.NoLighting
+                                }
+                            }
                         }
                     }
                 }
@@ -295,7 +369,7 @@ Item {
             eulerRotation: root.upEuler
 
             Model {
-                visible: processor.parts.geometryReady
+                visible: processor.parts.geometryReady && !root.explodeActive
                 geometry: PartsGeometry { partsModel: processor.parts }
                 materials: PrincipledMaterial {
                     vertexColorsEnabled: true       // each vertex draws its Part colour
@@ -305,6 +379,28 @@ Item {
                     // them outright, so they vanish with no see-through ordering artifacts.
                     alphaMode: PrincipledMaterial.Mask
                     alphaCutoff: 0.5
+                }
+            }
+            // Explode (#31) in the parts render mode: each chunk in its Part's flat
+            // swatch colour, translated by its offset × amount, replacing the fused
+            // flat-colour mesh while Space is held.
+            Repeater3D {
+                model: root.explodeActive ? processor.parts.chunkCount : 0
+                delegate: Node {
+                    required property int index
+                    position: processor.parts.chunkOffset(index).times(root.explodeAmount)
+                    Model {
+                        geometry: ExplodeChunkGeometry {
+                            partsModel: processor.parts; chunkIndex: index; topology: "triangles"
+                        }
+                        materials: PrincipledMaterial {
+                            baseColor: {
+                                var c = processor.parts.chunkColour(index);
+                                return Qt.rgba(c[0] / 255, c[1] / 255, c[2] / 255, 1);
+                            }
+                            lighting: PrincipledMaterial.NoLighting  // flat swatch, no gradient
+                        }
+                    }
                 }
             }
         }
@@ -359,6 +455,7 @@ Item {
         }
 
         onPressed: function(mouse) {
+            root.forceActiveFocus();  // grab keyboard focus so hold-Space reaches Explode
             lastX = mouse.x;
             lastY = mouse.y;
             // Left paints — but only in parts mode; elsewhere the left button is inert.
@@ -404,11 +501,16 @@ Item {
             painting = false;
         }
 
-        WheelHandler {  // zoom — pull the camera dolly in / out along its view axis
+        WheelHandler {  // wheel sets the explode amount while Space is held, else zooms
             acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
             onWheel: function(event) {
-                camera.z = Math.max(root._radius() * 0.2,
-                                    camera.z - event.angleDelta.y * 0.0015 * camera.z);
+                if (root.exploding) {  // adjust the spread, not the dolly
+                    root.explodeAmount = Math.max(0, Math.min(4,
+                        root.explodeAmount + event.angleDelta.y * 0.0015));
+                } else {  // zoom — pull the camera dolly in / out along its view axis
+                    camera.z = Math.max(root._radius() * 0.2,
+                                        camera.z - event.angleDelta.y * 0.0015 * camera.z);
+                }
             }
         }
     }

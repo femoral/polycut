@@ -201,6 +201,92 @@ def build_highlight_buffers(mesh, face_ids) -> HighlightBuffers:
     )
 
 
+@dataclass(frozen=True)
+class PartChunk:
+    """One Part's geometry, ready to draw as its own translated node for Explode (#31).
+
+    ``offset`` is the radial spread direction (part centroid − model centroid),
+    scaled by the live ``amount`` in the viewport; Unassigned's is the zero vector so
+    the remainder stays anchored. The vertex buffer is gathered from the fused mesh's
+    own positions/normals/UVs (no ``trimesh.submesh`` recompute), with the triangle +
+    edge indices remapped into the chunk's own compacted vertex range.
+    """
+
+    part_id: int
+    colour: tuple[int, int, int]
+    offset: tuple[float, float, float]
+    vertex_count: int
+    triangle_count: int
+    line_count: int
+    vertex_data: bytes
+    index_data: bytes
+    line_index_data: bytes
+    stride: int
+    bounds_min: tuple[float, float, float]
+    bounds_max: tuple[float, float, float]
+
+
+def build_part_chunks(mesh, partition) -> list[PartChunk]:
+    """Decompose ``mesh`` into one :class:`PartChunk` per non-empty Part.
+
+    Built once per carve and cached: the viewport spreads the chunks by translating
+    each node by ``offset × amount`` (no per-tick buffer re-upload). Each chunk reuses
+    the fused mesh's interleaved positions/normals/UVs — gathered for the Part's own
+    vertices, with indices remapped — so the chunks shade exactly like the assembled
+    mesh and the dropped-normals-cache slow path is avoided. Unassigned is anchored
+    (zero offset); the carved Parts pop radially out of it.
+    """
+    positions = np.asarray(mesh.vertices, dtype=np.float32)
+    normals = np.asarray(mesh.vertex_normals, dtype=np.float32)
+    uv = _vertex_uv(mesh, len(positions))
+    interleaved = np.ascontiguousarray(np.hstack([positions, normals, uv]), dtype=np.float32)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    centroids = np.asarray(mesh.triangles_center, dtype=np.float64)
+    model_centroid = centroids.mean(axis=0)
+    stride = interleaved.shape[1] * 4
+
+    chunks: list[PartChunk] = []
+    labels = np.asarray(partition.labels)
+    for part in partition.parts:
+        part_faces = np.where(labels == part.id)[0]
+        if part_faces.size == 0:
+            continue  # an empty Part draws nothing — no chunk
+
+        tris = faces[part_faces]
+        used = np.unique(tris)  # the vertices this Part's faces touch
+        remap = np.empty(len(positions), dtype=np.int64)
+        remap[used] = np.arange(len(used))
+        chunk_vertices = np.ascontiguousarray(interleaved[used])
+        chunk_tris = np.ascontiguousarray(remap[tris].astype(np.uint32))
+        chunk_edges = _unique_edges(remap[tris])
+
+        if part.id == UNASSIGNED_ID:
+            offset = (0.0, 0.0, 0.0)  # the remainder stays put
+        else:
+            delta = centroids[part_faces].mean(axis=0) - model_centroid
+            offset = (float(delta[0]), float(delta[1]), float(delta[2]))
+
+        lo = chunk_vertices[:, :3].min(axis=0)
+        hi = chunk_vertices[:, :3].max(axis=0)
+        chunks.append(
+            PartChunk(
+                part_id=part.id,
+                colour=tuple(part.colour),
+                offset=offset,
+                vertex_count=len(used),
+                triangle_count=int(part_faces.shape[0]),
+                line_count=int(chunk_edges.shape[0]),
+                vertex_data=chunk_vertices.tobytes(),
+                index_data=chunk_tris.tobytes(),
+                line_index_data=np.ascontiguousarray(chunk_edges).tobytes(),
+                stride=stride,
+                bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
+                bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+            )
+        )
+    return chunks
+
+
 def _fuse_scene(scene: "trimesh.Scene"):
     """Fuse a multi-geometry scene into one ``Trimesh`` for the viewport.
 

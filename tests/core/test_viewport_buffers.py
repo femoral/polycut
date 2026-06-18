@@ -17,7 +17,12 @@ import trimesh
 
 from polycut.core import build_mesh_buffers, load_source_model
 from polycut.core.model import SourceModel
-from polycut.core.viewport import build_highlight_buffers, build_highlight_lines
+from polycut.core.parts import UNASSIGNED_ID, Partition
+from polycut.core.viewport import (
+    build_highlight_buffers,
+    build_highlight_lines,
+    build_part_chunks,
+)
 
 MULTI_OBJECT = (
     Path(__file__).resolve().parents[1] / "fixtures" / "multi_object" / "two_cubes.obj"
@@ -265,6 +270,74 @@ def test_highlight_buffers_reuse_mesh_positions_and_outline_indices(textured_mod
     pairs = np.frombuffer(buffers.index_data, np.uint32).reshape(-1, 2)
     assert buffers.line_count == 3
     assert {tuple(int(v) for v in p) for p in pairs} == {(0, 1), (1, 2), (0, 2)}
+
+
+def _three_strip(normals=None):
+    """Three separate triangles centred at x = −2, 0, +2 in the z=0 plane, with
+    explicit per-vertex normals so a chunk can be checked for normal reuse."""
+    verts, faces, norms = [], [], []
+    normals = normals or [[0.0, 0.0, 1.0]] * 3
+    for cx, normal in zip((-2.0, 0.0, 2.0), normals):
+        b = len(verts)
+        verts += [[cx - 0.3, -0.3, 0], [cx + 0.3, -0.3, 0], [cx, 0.4, 0]]
+        norms += [normal] * 3
+        faces.append([b, b + 1, b + 2])
+    return trimesh.Trimesh(
+        vertices=np.array(verts, float), faces=np.array(faces, np.int64),
+        vertex_normals=np.array(norms, float), process=False,
+    )
+
+
+def _abc_partition():
+    """Partition the three-strip: face 0 → Part A, face 2 → Part B, face 1 stays
+    Unassigned — Parts on opposite sides of the model with the remainder in the middle."""
+    partition = Partition.fresh(face_count=3)
+    a = partition.create_part("A")
+    partition.assign([0], a)
+    b = partition.create_part("B")
+    partition.assign([2], b)
+    return partition, a, b
+
+
+def test_part_chunks_offset_each_part_radially_with_unassigned_anchored():
+    """Explode (#31) decomposes the mesh into one chunk per Part, each carrying its
+    radial offset (part centroid − model centroid). The Parts on either side push out
+    in opposite directions; the Unassigned remainder stays anchored at the origin."""
+    mesh = _three_strip()
+    partition, a, b = _abc_partition()
+
+    chunks = {c.part_id: c for c in build_part_chunks(mesh, partition)}
+
+    # model centroid sits at x = mean(−2, 0, 2) = 0
+    np.testing.assert_allclose(chunks[a].offset, [-2.0, 0.0, 0.0], atol=1e-6)
+    np.testing.assert_allclose(chunks[b].offset, [2.0, 0.0, 0.0], atol=1e-6)
+    assert chunks[UNASSIGNED_ID].offset == (0.0, 0.0, 0.0)  # the remainder never moves
+
+
+def test_part_chunks_partition_every_face_exactly_once():
+    """The chunks together cover every face of the mesh, no gaps or overlaps — the
+    exploded view shows the whole model. An empty Part contributes no chunk."""
+    mesh = _three_strip()
+    partition, _, _ = _abc_partition()
+
+    chunks = build_part_chunks(mesh, partition)
+
+    assert sum(c.triangle_count for c in chunks) == 3  # exhaustive over the 3 faces
+    assert len(chunks) == 3  # Unassigned + A + B; none empty here
+
+
+def test_part_chunks_reuse_the_fused_vertex_normals():
+    """Each chunk reuses the fused mesh's own vertex normals (gathered, not recomputed
+    via trimesh .submesh()), so the exploded chunks shade exactly like the assembled
+    mesh. Deliberately non-geometric normals would differ under a recompute."""
+    weird = [[0.0, 1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    mesh = _three_strip(normals=weird)
+    partition, a, _ = _abc_partition()
+
+    chunk = {c.part_id: c for c in build_part_chunks(mesh, partition)}[a]
+
+    floats = np.frombuffer(chunk.vertex_data, np.float32).reshape(chunk.vertex_count, -1)
+    np.testing.assert_allclose(floats[:, 3:6], [[0.0, 1.0, 0.0]] * 3, atol=1e-6)  # Part A's normal
 
 
 def test_buffers_expose_bounds_for_framing(textured_model):

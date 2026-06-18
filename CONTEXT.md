@@ -25,3 +25,19 @@ _Avoid_: decimate, reduce, optimize (use "simplify" in UI and discussion)
 
 **Plasticky shine**:
 The over-glossy default surface look baked into Meshy exports that reads as fake/plastic once in SketchUp or Enscape. The main material complaint, distinct from missing or stretched textures.
+
+**Render mode**:
+How the viewport draws the geometry — the top viewport toggle: `shaded` (lit solid), `edges` (solid + topology lines), `wireframe` (lines only), `parts` (flat per-Part swatch colour). A property of *style*, orthogonal to the View framing.
+_Avoid_: tab, view, mode (overloaded — say "render mode")
+
+**View framing**:
+Which model fills the stage — the bottom viewport toggle: `original` (full-res Source only), `split` (draggable before/after divider), `simplified` (the cut only). Parts live only on the simplified mesh, so Part-centric features (Highlight, Explode) act on the simplified side and are absent on the `original` side.
+_Avoid_: tab, view, mode (overloaded — say "view framing")
+
+**Explode**:
+A momentary, view-only spreading of the Parts so the designer can see between them — each Part slides radially out from the model centroid by `(part_centroid − model_centroid) × amount`, scaled to the model size. **Unassigned stays anchored** (the carved Parts pop out of the remainder). Held on a key (Space); the wheel sets `amount` only while held; releasing re-assembles. Never baked into the export. Acts on the simplified mesh in any Render mode; holding it force-switches View framing to `simplified` for the duration.
+_Avoid_: blow apart, separate, disassemble (say "explode")
+
+**Highlight**:
+The transient visual emphasis of the **active Part** across the viewport — selecting a Part (outliner row, and in time the viewport) makes its faces stand out wherever the simplified mesh is shown, not only in the `parts` Render mode. Distinct from a Part's permanent swatch colour: highlight is about *which Part is the current edit target*, not its identity.
+_Avoid_: select-colour, active-colour (highlight is the emphasis, not the swatch)

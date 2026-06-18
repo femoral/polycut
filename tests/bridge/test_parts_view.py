@@ -374,6 +374,40 @@ def test_highlight_geometry_outlines_the_active_parts_faces():
     assert vm.highlightReady is False
 
 
+def test_explode_chunks_decompose_the_mesh_per_part_with_offsets():
+    """Explode (#31) exposes one chunk per non-empty Part — each with its radial
+    offset and its own geometry buffers — so the viewport can spread them as
+    translated nodes. The Unassigned remainder's offset is zero (it stays anchored)."""
+    from polycut.core.viewport import build_part_chunks
+
+    mesh, texture, centers = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    wood = vm.createPart()
+    vm.activeTool = "wand"
+    vm.wandGlobal = True
+    vm.wandThreshold = 10.0
+    _click(vm, centers[0])  # BROWN faces 0,1 → wood; GREY face 2 stays Unassigned
+
+    reference = {c.part_id: c for c in build_part_chunks(mesh, vm.export_partition())}
+    assert vm.chunkCount == len(reference) == 2
+
+    by_part = {}
+    for i in range(vm.chunkCount):
+        pid = vm.chunkPartId(i)
+        by_part[pid] = i
+        off = vm.chunkOffset(i)
+        np.testing.assert_allclose(
+            [off.x(), off.y(), off.z()], reference[pid].offset, atol=1e-5
+        )
+        assert len(vm.chunkVertexData(i)) > 0  # carries its gathered vertices
+        assert len(vm.chunkTriangleData(i)) > 0  # and its remapped triangles
+
+    assert by_part.keys() == reference.keys()  # Unassigned + wood
+    anchored = vm.chunkOffset(by_part[0])  # the Unassigned remainder
+    assert (anchored.x(), anchored.y(), anchored.z()) == (0.0, 0.0, 0.0)
+
+
 def test_renaming_and_toggling_visibility_round_trip_to_the_rows():
     """Renaming a Part and hiding it flow straight back into the outliner rows and
     notify — the inline-rename field and the eye toggle in G bind to these."""
