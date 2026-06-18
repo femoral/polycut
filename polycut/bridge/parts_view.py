@@ -30,7 +30,7 @@ from polycut.core.brush import SpatialBrush
 from polycut.core.parts import UNASSIGNED_ID, Partition
 from polycut.core.picking import add_to_part, colour_wand, pick_face, screen_ray
 from polycut.core.segment import apply_clusters, colour_clusters
-from polycut.core.viewport import build_part_buffers
+from polycut.core.viewport import build_highlight_buffers, build_part_buffers
 
 TOOLS = ("cluster", "wand", "brush")  # auto-split, magic wand, spatial brush
 
@@ -57,6 +57,7 @@ class PartsViewModel(QObject):
         self._partition: Partition | None = None
         self._brush: SpatialBrush | None = None  # centroid KD-tree, rebuilt per mesh
         self._buffers = None  # cached flat-colour Parts buffer; rebuilt lazily on carve
+        self._highlight_buffers = None  # cached active-Part outline; rebuilt with the highlight
         self._last_brush_point = None  # previous brush hit in a drag, for stroke fill-in
         self._active_part = UNASSIGNED_ID  # edits target the remainder until a Part exists
         self._active_tool = "cluster"  # the first manual tool in the panel
@@ -139,6 +140,13 @@ class PartsViewModel(QObject):
         return [int(f) for f in (self._partition.labels == self._active_part).nonzero()[0]]
 
     highlightFaces = Property("QVariantList", _get_highlight_faces, notify=highlightChanged)
+
+    def _has_highlight(self) -> bool:
+        """Whether the active Part should be outlined across the render modes (#30) —
+        any real Part, but never the Unassigned remainder."""
+        return self._partition is not None and self._active_part != UNASSIGNED_ID
+
+    hasHighlight = Property(bool, _has_highlight, notify=highlightChanged)
 
     @Slot(int, str)
     def renamePart(self, part_id: int, name: str) -> None:
@@ -354,6 +362,7 @@ class PartsViewModel(QObject):
     # carve / visibility change — so a brush drag invalidates once, not per query.
     def _invalidate_geometry(self) -> None:
         self._buffers = None
+        self._highlight_buffers = None  # the outline follows the same carves/selection
         self.geometryChanged.emit()
 
     def _ensure_geometry(self):
@@ -394,4 +403,50 @@ class PartsViewModel(QObject):
     def geometryIndexData(self) -> QByteArray:
         """The triangle index buffer the Parts geometry uploads."""
         buffers = self._ensure_geometry()
+        return QByteArray(buffers.index_data) if buffers else QByteArray()
+
+    # ---- active-Part outline overlay (the cross-mode highlight, #30) ----
+    # A teal line set of the active Part's edges, drawn over the fused mesh in shaded /
+    # edges / wireframe (parts mode keeps its own brighten-toward-white). Reuses the
+    # fused mesh's positions so the lines lie on the surface; rebuilt lazily with the
+    # highlight and stood down (no buffers) whenever Unassigned is the edit target.
+    def _ensure_highlight(self):
+        if self._highlight_buffers is None and self._mesh is not None and self._has_highlight():
+            face_ids = (self._partition.labels == self._active_part).nonzero()[0]
+            self._highlight_buffers = build_highlight_buffers(self._mesh, face_ids)
+        return self._highlight_buffers if self._has_highlight() else None
+
+    def _get_highlight_ready(self) -> bool:
+        return self._ensure_highlight() is not None
+
+    highlightReady = Property(bool, _get_highlight_ready, notify=highlightChanged)
+
+    def _get_highlight_stride(self) -> int:
+        buffers = self._ensure_highlight()
+        return buffers.stride if buffers else 0
+
+    highlightStride = Property(int, _get_highlight_stride, notify=highlightChanged)
+
+    def _get_highlight_bounds_min(self) -> QVector3D:
+        buffers = self._ensure_highlight()
+        return QVector3D(*buffers.bounds_min) if buffers else QVector3D()
+
+    highlightBoundsMin = Property(QVector3D, _get_highlight_bounds_min, notify=highlightChanged)
+
+    def _get_highlight_bounds_max(self) -> QVector3D:
+        buffers = self._ensure_highlight()
+        return QVector3D(*buffers.bounds_max) if buffers else QVector3D()
+
+    highlightBoundsMax = Property(QVector3D, _get_highlight_bounds_max, notify=highlightChanged)
+
+    @Slot(result=QByteArray)
+    def highlightVertexData(self) -> QByteArray:
+        """The position-only vertex buffer the outline overlay uploads."""
+        buffers = self._ensure_highlight()
+        return QByteArray(buffers.vertex_data) if buffers else QByteArray()
+
+    @Slot(result=QByteArray)
+    def highlightLineData(self) -> QByteArray:
+        """The active Part's edge-index buffer (low→high pairs) for the Lines pass."""
+        buffers = self._ensure_highlight()
         return QByteArray(buffers.index_data) if buffers else QByteArray()

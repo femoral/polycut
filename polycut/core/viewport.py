@@ -149,6 +149,58 @@ def build_part_colours(
     return colours
 
 
+@dataclass(frozen=True)
+class HighlightBuffers:
+    """GPU buffers for the active-Part outline overlay (#30).
+
+    ``vertex_data`` is position only (3 floats) — the overlay reuses the fused
+    mesh's own vertices, so the lines lie exactly on the surface; ``index_data``
+    holds the active Part's unique edges as low→high vertex-index pairs, drawn as a
+    Lines primitive, depth-tested against the solid so occluded edges don't bleed.
+    """
+
+    vertex_count: int
+    line_count: int
+    vertex_data: bytes
+    index_data: bytes
+    stride: int
+    bounds_min: tuple[float, float, float]
+    bounds_max: tuple[float, float, float]
+
+
+def build_highlight_lines(mesh, face_ids) -> np.ndarray:
+    """The unique low→high edges among ``face_ids`` — the active Part's outline.
+
+    Reuses :func:`_unique_edges`, so a Part's faces contribute each shared edge once.
+    Returns an ``(n_edges, 2)`` ``uint32`` array indexing ``mesh``'s vertices.
+    """
+    faces = np.asarray(mesh.faces, dtype=np.int64)[np.asarray(face_ids, dtype=np.int64)]
+    return _unique_edges(faces)
+
+
+def build_highlight_buffers(mesh, face_ids) -> HighlightBuffers:
+    """Build the outline overlay buffers for ``face_ids`` over ``mesh``.
+
+    Positions are the fused mesh's own vertices (so the overlay registers exactly on
+    the surface), with a position-only stride; the index buffer is the active Part's
+    edges (:func:`build_highlight_lines`). Rebuilt whenever the active Part or its
+    face set changes.
+    """
+    positions = np.asarray(mesh.vertices, dtype=np.float32)
+    edges = build_highlight_lines(mesh, face_ids)
+    lo = positions.min(axis=0)
+    hi = positions.max(axis=0)
+    return HighlightBuffers(
+        vertex_count=len(positions),
+        line_count=int(edges.shape[0]),
+        vertex_data=np.ascontiguousarray(positions).tobytes(),
+        index_data=np.ascontiguousarray(edges).tobytes(),
+        stride=positions.shape[1] * 4,
+        bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
+        bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+    )
+
+
 def _fuse_scene(scene: "trimesh.Scene"):
     """Fuse a multi-geometry scene into one ``Trimesh`` for the viewport.
 

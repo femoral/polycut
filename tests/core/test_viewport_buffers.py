@@ -17,6 +17,7 @@ import trimesh
 
 from polycut.core import build_mesh_buffers, load_source_model
 from polycut.core.model import SourceModel
+from polycut.core.viewport import build_highlight_buffers, build_highlight_lines
 
 MULTI_OBJECT = (
     Path(__file__).resolve().parents[1] / "fixtures" / "multi_object" / "two_cubes.obj"
@@ -236,6 +237,34 @@ def test_untextured_model_still_builds_a_valid_buffer(untextured_model):
     assert buffers.vertex_count == 4
     assert floats.shape[1] == 8  # pos3 + norm3 + uv2 — stable with or without UVs
     np.testing.assert_array_equal(floats[:, 6:8], 0.0)
+
+
+def test_highlight_lines_are_the_edges_of_just_the_given_faces(textured_model):
+    """The active-Part outline (#30) is the unique edges of only that Part's faces —
+    so selecting one triangle of the quad outlines its 3 edges, not the whole mesh.
+    Selecting both faces yields the same 5 deduped edges as the full mesh."""
+    mesh = textured_model.geometry  # 2-triangle quad sharing the 0–2 diagonal
+
+    edges = build_highlight_lines(mesh, [0])  # face 0 = verts (0, 1, 2)
+
+    assert {tuple(int(v) for v in e) for e in edges} == {(0, 1), (1, 2), (0, 2)}
+    assert len(build_highlight_lines(mesh, [0, 1])) == 5  # whole quad, diagonal deduped
+
+
+def test_highlight_buffers_reuse_mesh_positions_and_outline_indices(textured_model):
+    """The outline overlay reuses the fused mesh's own vertex positions (so the lines
+    lie exactly on the surface) with a position-only stride, and a line-index buffer
+    holding just the active Part's edges."""
+    mesh = textured_model.geometry
+
+    buffers = build_highlight_buffers(mesh, [0])
+
+    positions = np.frombuffer(buffers.vertex_data, np.float32).reshape(buffers.vertex_count, 3)
+    np.testing.assert_allclose(positions, mesh.vertices, atol=1e-6)
+    assert buffers.stride == 12  # position only — 3 × float32
+    pairs = np.frombuffer(buffers.index_data, np.uint32).reshape(-1, 2)
+    assert buffers.line_count == 3
+    assert {tuple(int(v) for v in p) for p in pairs} == {(0, 1), (1, 2), (0, 2)}
 
 
 def test_buffers_expose_bounds_for_framing(textured_model):

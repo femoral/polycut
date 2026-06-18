@@ -334,6 +334,46 @@ def test_selecting_a_part_makes_it_active_and_highlights_its_faces():
     assert emits == [0, wood]
 
 
+def test_has_highlight_is_true_only_for_a_real_active_part():
+    """The cross-mode outline (#30) lights up the active Part — but never the
+    Unassigned remainder, so hasHighlight gates the overlay off when Unassigned is the
+    edit target and on for any real Part."""
+    mesh, texture, _ = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    assert vm.hasHighlight is False  # Unassigned active — nothing to outline
+
+    wood = vm.createPart()
+    assert vm.hasHighlight is True   # a real Part is the edit target
+
+    vm.activePartId = 0  # back to the remainder
+    assert vm.hasHighlight is False
+
+
+def test_highlight_geometry_outlines_the_active_parts_faces():
+    """The overlay geometry holds exactly the active Part's outline edges — so the
+    viewport can draw a teal outline of its faces over the fused mesh in shaded /
+    edges / wireframe. It stands down (not ready) when Unassigned is active."""
+    from polycut.core.viewport import build_highlight_lines
+
+    mesh, texture, centers = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    wood = vm.createPart()
+    vm.activeTool = "wand"
+    vm.wandGlobal = True
+    vm.wandThreshold = 10.0
+    _click(vm, centers[0])  # paint the two BROWN faces (0, 1) into wood
+
+    assert vm.highlightReady is True
+    pairs = np.frombuffer(vm.highlightLineData(), np.uint32).reshape(-1, 2)
+    expected = {tuple(int(v) for v in e) for e in build_highlight_lines(mesh, [0, 1])}
+    assert {tuple(int(v) for v in p) for p in pairs} == expected
+
+    vm.activePartId = 0  # Unassigned — the overlay stands down
+    assert vm.highlightReady is False
+
+
 def test_renaming_and_toggling_visibility_round_trip_to_the_rows():
     """Renaming a Part and hiding it flow straight back into the outliner rows and
     notify — the inline-rename field and the eye toggle in G bind to these."""

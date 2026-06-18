@@ -56,6 +56,8 @@ The app shell is a fixed frame:
 
 Alt accent themes exist in the prototype (green hue 155, purple hue 320). Default ships teal; theming is optional, not MVP-1.
 
+**Viewport line roles (#30):** **`teal` = the active Part** — reserved in the 3D viewport for the active-Part highlight (its outline across shaded / edges / wireframe, and its brighten in the parts view). **Plain topology lines (edges / wireframe) are `fg-2`** (neutral grey), so the teal outline always reads as "the current edit target," never as ordinary mesh structure.
+
 ## 4. Typography
 
 - **`--font-ui` = Inter** — all labels, buttons, body. Section headers are **uppercase, letter-spaced, `fg-2`** (e.g. `SCENE OUTLINER`, `SIMPLIFY`, `PRESERVE`).

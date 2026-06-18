@@ -162,7 +162,9 @@ Item {
                 depthBias: root.lineDepthBias
                 geometry: MeshGeometry { meshView: root.original; topology: "lines" }
                 materials: PrincipledMaterial {
-                    baseColor: Theme.teal
+                    // Neutral grey for plain topology — teal is reserved for the
+                    // active-Part highlight (#30, design-system §3).
+                    baseColor: Theme.fg2
                     lighting: PrincipledMaterial.NoLighting  // flat lines, not shaded
                 }
             }
@@ -232,6 +234,19 @@ Item {
                         visible: root.afterMesh && root.afterMesh.hasMesh && root.showWire
                         depthBias: root.lineDepthBias
                         geometry: MeshGeometry { meshView: root.afterMesh; topology: "lines" }
+                        materials: PrincipledMaterial {
+                            baseColor: Theme.fg2  // plain topology grey; teal = highlight
+                            lighting: PrincipledMaterial.NoLighting
+                        }
+                    }
+                    Model {  // active-Part outline (#30): teal lines over the fused mesh,
+                             // depth-tested so faces behind the surface don't bleed through.
+                             // Shown in shaded / edges / wireframe; parts mode (the after
+                             // side is hidden there) keeps its own brighten-toward-white.
+                        visible: root.afterMesh && root.afterMesh.hasMesh
+                                 && processor.parts.hasHighlight
+                        depthBias: root.lineDepthBias
+                        geometry: HighlightGeometry { partsModel: processor.parts }
                         materials: PrincipledMaterial {
                             baseColor: Theme.teal
                             lighting: PrincipledMaterial.NoLighting
