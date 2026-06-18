@@ -482,12 +482,17 @@ Item {
         }
     }
 
-    // ---- in-progress chip (teal activity, never coral) -----------------
+    // ---- one universal processing chip (#29, teal activity, never coral) ----
+    // Anchored top-right of the stage, below the "N simplified" caption (which is
+    // hidden in parts mode, so they never overlap). Visible in every render mode and
+    // framing whenever an op runs — load / simplify / export / cluster — each with its
+    // own label off the bridge. The status-bar busy indicator stays the always-on cue.
     Rectangle {
-        anchors.horizontalCenter: afterClip.horizontalCenter
+        anchors.right: parent.right
         anchors.top: parent.top
-        anchors.topMargin: Theme.pad + Theme.rowHeight
-        visible: processor.simplifying && root.viewMode !== "original" && !root.partsMode
+        anchors.rightMargin: Theme.pad
+        anchors.topMargin: Theme.pad + Theme.rowHeight  // clear of the face-count caption
+        visible: processor.processingLabel !== ""
         implicitHeight: Theme.chipHeight + Theme.gapXs
         implicitWidth: chipRow.implicitWidth + Theme.chipPadH * 2
         radius: height / 2
@@ -504,7 +509,7 @@ Item {
                 width: Theme.dotSize; height: Theme.dotSize; radius: width / 2
                 color: Theme.teal
                 SequentialAnimation on opacity {
-                    running: processor.simplifying
+                    running: processor.processingLabel !== ""
                     loops: Animation.Infinite
                     NumberAnimation { from: 1.0; to: 0.3; duration: Theme.durStandard }
                     NumberAnimation { from: 0.3; to: 1.0; duration: Theme.durStandard }
@@ -512,9 +517,8 @@ Item {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                // First load has no prior cut → "computing first cut…"; later cuts
-                // keep the last good mesh dimmed → "simplifying…".
-                text: root.simplified && root.simplified.hasMesh ? "simplifying…" : "computing first cut…"
+                // loading… / simplifying… / exporting… / clustering… — the op in flight.
+                text: processor.processingLabel
                 color: Theme.teal
                 font.family: Theme.fontUi
                 font.pixelSize: Theme.fontSmall

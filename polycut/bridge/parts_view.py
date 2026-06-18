@@ -20,6 +20,8 @@ object only marshals and notifies.
 
 from __future__ import annotations
 
+import threading
+
 import numpy as np
 from PySide6.QtCore import Property, QByteArray, QObject, Signal, Slot
 from PySide6.QtGui import QVector3D
@@ -27,7 +29,7 @@ from PySide6.QtGui import QVector3D
 from polycut.core.brush import SpatialBrush
 from polycut.core.parts import UNASSIGNED_ID, Partition
 from polycut.core.picking import add_to_part, colour_wand, pick_face, screen_ray
-from polycut.core.segment import split_by_colour
+from polycut.core.segment import apply_clusters, colour_clusters
 from polycut.core.viewport import build_part_buffers
 
 TOOLS = ("cluster", "wand", "brush")  # auto-split, magic wand, spatial brush
@@ -40,9 +42,16 @@ class PartsViewModel(QObject):
     toolParamsChanged = Signal()  # K / threshold / global / radius moved
     highlightChanged = Signal()  # the active Part's face set (the viewport overlay) moved
     geometryChanged = Signal()  # the flat-colour Parts buffer moved (a carve / visibility)
+    clusteringChanged = Signal()  # a cluster started / landed (drives the chip + input gate)
+    _clusterReady = Signal(object)  # internal: a worker's cluster result, queued to the GUI thread
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
+        # The cluster's k-means runs on a worker; its result is delivered back here as
+        # a queued signal, so the relabel is applied on the GUI thread (#29). Cross-
+        # thread emit → Qt's auto-connection queues it onto this object's event loop.
+        self._clustering = False
+        self._clusterReady.connect(self._finish_cluster)
         self._mesh = None
         self._texture = None
         self._partition: Partition | None = None
@@ -214,34 +223,85 @@ class PartsViewModel(QObject):
         axes, vertical fov, viewport size); ``core`` builds the world ray
         (:func:`screen_ray`) and the nearest hit face (:func:`pick_face`). The active
         tool then carves at that face through A's partition ops. Returns the hit face
-        id, or ``-1`` on a miss (an empty click)."""
-        if self._partition is None:
-            return -1
+        id, or ``-1`` on a miss (an empty click) or while a cluster is in flight."""
+        if self._partition is None or self._clustering:
+            return -1  # carve input is gated while a cluster runs off-thread (#29)
         origin, direction = screen_ray(cam_pos, forward, up, fov_y, x, y, width, height)
         face = pick_face(self._mesh, origin, direction)
         if face is None:
             return -1
-        self._apply_tool(int(face))
+        if self._active_tool == "cluster":  # heavy k-means → worker; relabel on return
+            self._start_cluster(int(face))
+            return int(face)
+        self._apply_tool(int(face))  # wand / brush are cheap — carve synchronously
         self._invalidate_geometry()  # the flat-colour buffer follows the carve
         self.partsChanged.emit()
         self.highlightChanged.emit()  # the active Part's face set may have grown/shrunk
         return int(face)
 
     def _apply_tool(self, face: int) -> None:
-        """Carve at ``face`` with the active tool: the brush paints its proximity
-        sphere, the wand grows by colour, the cluster splits the picked face's Part."""
+        """Carve at ``face`` with the active synchronous tool: the brush paints its
+        proximity sphere, the wand grows by colour. (The cluster runs off the GUI
+        thread — see :meth:`_start_cluster`.)"""
         partition, mesh, texture = self._partition, self._mesh, self._texture
         if self._active_tool == "brush":
             hit = mesh.triangles_center[face]
             self._brush.paint(partition, self._stroke_points(hit), self._brush_radius, self._active_part)
             self._last_brush_point = hit
-        elif self._active_tool == "wand":
+        else:  # wand — grow by colour
             mode = "global" if self._wand_global else "local"
             faces = colour_wand(mesh, texture, seed=face, threshold=self._wand_threshold, mode=mode)
             add_to_part(partition, faces, self._active_part)
-        else:  # cluster — subdivide the Part the picked face belongs to
-            scope = int(partition.labels[face])
-            split_by_colour(partition, mesh, texture, k=self._cluster_k, scope=scope)
+
+    # ---- cluster off the GUI thread (#29) ------------------------------
+    def _get_clustering(self) -> bool:
+        return self._clustering
+
+    def _set_clustering(self, value: bool) -> None:
+        if value != self._clustering:
+            self._clustering = value
+            self.clusteringChanged.emit()
+
+    clustering = Property(bool, _get_clustering, notify=clusteringChanged)
+
+    def _start_cluster(self, face: int) -> None:
+        """Cluster the picked face's Part off the GUI thread. The k-means runs on a
+        worker; the relabel comes back through :attr:`_clusterReady` and is applied on
+        the GUI thread, so it never races the outliner / buffer reads. ``scope_faces``
+        is snapshotted now (cheap), so the worker only does the perceptual maths."""
+        scope = int(self._partition.labels[face])
+        scope_faces = np.where(self._partition.labels == scope)[0]
+        if scope_faces.size == 0:
+            return  # nothing to carve (e.g. everything already assigned)
+        self._set_clustering(True)
+        mesh, texture, k = self._mesh, self._texture, self._cluster_k
+
+        def work() -> None:
+            try:
+                clusters = colour_clusters(mesh, texture, scope_faces, k)
+            except Exception:  # a failed cluster clears the flag without carving
+                clusters = None
+            self._clusterReady.emit(
+                {"mesh": mesh, "scope": scope, "scope_faces": scope_faces,
+                 "clusters": clusters, "k": k}
+            )
+
+        threading.Thread(target=work, daemon=True).start()
+
+    @Slot(object)
+    def _finish_cluster(self, result) -> None:
+        """Apply a finished cluster's relabel on the GUI thread, then clear the flag.
+        The result is dropped if the bound mesh changed under it (a re-cut rebind
+        landed mid-cluster — its face ids would index the wrong mesh)."""
+        clusters = result["clusters"]
+        if clusters is not None and result["mesh"] is self._mesh and self._partition is not None:
+            apply_clusters(
+                self._partition, result["scope"], result["scope_faces"], clusters, result["k"]
+            )
+            self._invalidate_geometry()  # the flat-colour buffer follows the carve
+            self.partsChanged.emit()
+            self.highlightChanged.emit()
+        self._set_clustering(False)
 
     def _stroke_points(self, hit):
         """Brush samples from the previous hit to ``hit``, so a fast drag paints a

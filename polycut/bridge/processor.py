@@ -73,6 +73,7 @@ class Processor(QObject):
     statusChanged = Signal()
     scaleChanged = Signal()
     simplifyingChanged = Signal()
+    processingChanged = Signal()
     renderModeChanged = Signal()
     selectionChanged = Signal()
     upAxisChanged = Signal()
@@ -94,6 +95,9 @@ class Processor(QObject):
         # the exporter writes — and a re-cut clears Parts (their labels indexed the old
         # face set). Headless `core` owns the carving maths; this is its Qt projection.
         self._parts = PartsViewModel(self)
+        # A cluster runs off-thread in the Parts view-model; its flag feeds the one
+        # universal chip, so re-evaluate the label whenever it flips (#29).
+        self._parts.clusteringChanged.connect(self.processingChanged)
         # The OBJ parsed into PyMeshLab once per model; re-cut from memory on each
         # settle (#18). Built + disposed only on the serialized simplify worker, so
         # PyMeshLab is never touched from two threads. _simplifier_model records
@@ -101,7 +105,11 @@ class Processor(QObject):
         self._simplifier = None
         self._simplifier_model = None
         self._busy = False
-        self._simplifying = False  # a faithful cut is in flight → on-canvas chip
+        self._simplifying = False  # a faithful cut is in flight → after-side dims
+        # The one in-flight op the universal chip names (#29). "" when idle; otherwise
+        # "loading" / "simplifying" / "exporting". A cluster runs off in the Parts
+        # view-model, so its "clustering…" is folded in from parts.clustering below.
+        self._op = ""
         self._status = "Awaiting import"
         self._render_mode = "shaded"  # viewport shading: shaded | edges | wireframe
         self._selected_index = -1  # selected outliner row; -1 until a model loads
@@ -150,6 +158,29 @@ class Processor(QObject):
         if value != self._simplifying:
             self._simplifying = value
             self.simplifyingChanged.emit()
+
+    # ---- universal processing label (#29) ------------------------------
+    _OP_LABELS = {
+        "loading": "loading…",
+        "simplifying": "simplifying…",
+        "exporting": "exporting…",
+    }
+
+    def _set_op(self, op: str) -> None:
+        """Record the in-flight op (or '' for idle) and notify the chip."""
+        if op != self._op:
+            self._op = op
+            self.processingChanged.emit()
+
+    def _get_processing_label(self) -> str:
+        """The caption the one on-canvas chip shows — empty when nothing runs. A
+        cluster (off-thread in the Parts view-model) takes priority so its progress
+        shows even between cuts."""
+        if self._parts.clustering:
+            return "clustering…"
+        return self._OP_LABELS.get(self._op, "")
+
+    processingLabel = Property(str, _get_processing_label, notify=processingChanged)
 
     # ---- render mode (Shaded / Wireframe / Edges, #9) ------------------
     def _get_render_mode(self) -> str:
@@ -295,6 +326,7 @@ class Processor(QObject):
         source = _to_path(path)
         self._set_status(f"Loading {source.name}…")
         self._set_busy(True)
+        self._set_op("loading")  # the universal chip reads "loading…"
         threading.Thread(target=self._load_worker, args=(source,), daemon=True).start()
 
     def _load_worker(self, source: Path) -> None:
@@ -302,6 +334,7 @@ class Processor(QObject):
             model = load_source_model(source)
         except Exception as exc:  # surfaced to the user, never swallowed
             self._set_busy(False)
+            self._set_op("")
             self._set_status("Awaiting import")
             self.loadFailed.emit(str(exc))
             return
@@ -334,7 +367,8 @@ class Processor(QObject):
         self._target = self._clamp_target(int(target_faces))
         self._set_status("Simplifying…")
         self._set_busy(True)
-        self._set_simplifying(True)  # after-side dims + shows the teal chip
+        self._set_simplifying(True)  # after-side dims
+        self._set_op("simplifying")  # the universal chip reads "simplifying…"
         self.statsChanged.emit()  # reflect the new target on the input immediately
         with self._simplify_guard:
             self._pending_target = self._target
@@ -364,6 +398,7 @@ class Processor(QObject):
                     self._pending_target = None
                 self._set_busy(False)
                 self._set_simplifying(False)
+                self._set_op("")
                 self._set_status("Simplify failed")
                 self.simplifyFailed.emit(str(exc))
                 return
@@ -376,7 +411,8 @@ class Processor(QObject):
             self._refresh_mesh_view(simplified)  # feed the viewport off-thread
             self._rebind_parts(simplified)  # Parts re-cut onto the fresh mesh (#25)
             self._set_busy(False)
-            self._set_simplifying(False)  # fresh mesh swapped in — chip clears
+            self._set_simplifying(False)  # fresh mesh swapped in — after-side un-dims
+            self._set_op("")  # the cut landed — the chip clears
             self._set_status(f"Simplified to {simplified.face_count:,} faces")
             self.statsChanged.emit()
             self.scaleChanged.emit()  # the size readout follows the new geometry
@@ -626,6 +662,7 @@ class Processor(QObject):
         out = _to_path(output_path)
         self._set_status("Exporting to SketchUp…")
         self._set_busy(True)
+        self._set_op("exporting")  # the universal chip reads "exporting…"
         threading.Thread(target=self._export_worker, args=(out,), daemon=True).start()
 
     def _export_worker(self, out: Path) -> None:
@@ -652,10 +689,12 @@ class Processor(QObject):
             )
         except Exception as exc:
             self._set_busy(False)
+            self._set_op("")
             self._set_status("Export failed")
             self.exportFailed.emit(str(exc))
             return
         self._set_busy(False)
+        self._set_op("")  # export done — the chip clears
         self._set_status(f"Exported {result.output_path.name}")
         self.exportFinished.emit(
             str(result.output_path),

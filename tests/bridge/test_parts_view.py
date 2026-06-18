@@ -215,10 +215,21 @@ def test_pick_with_the_wand_grows_the_active_part_by_colour():
     assert sum(r["faceCount"] for r in vm.partsRows) == 3
 
 
-def test_pick_with_the_cluster_tool_splits_the_picked_parts_scope_by_colour():
+def _settle_cluster(vm, qapp, timeout=5.0):
+    """Pump the event loop until an in-flight cluster's relabel lands on the GUI
+    thread (the worker emits a queued signal the loop must deliver)."""
+    deadline = time.time() + timeout
+    while vm.clustering and time.time() < deadline:
+        qapp.processEvents()
+        time.sleep(0.005)
+    qapp.processEvents()
+
+
+def test_pick_with_the_cluster_tool_splits_the_picked_parts_scope_by_colour(qapp):
     """With the cluster tool active, clicking a face subdivides the Part that face
     belongs to into K colour clusters. Clicking inside Unassigned carves the whole
-    remainder: the two BROWN faces and the GREY one fall into separate Parts."""
+    remainder: the two BROWN faces and the GREY one fall into separate Parts. The
+    cluster runs off the GUI thread, so the split lands once the worker returns."""
     mesh, texture, centers = _pick_mesh()
     vm = PartsViewModel()
     vm.rebind(mesh, texture)
@@ -226,6 +237,7 @@ def test_pick_with_the_cluster_tool_splits_the_picked_parts_scope_by_colour():
     vm.clusterK = 2
 
     face = _click(vm, centers[0])  # click a face still in Unassigned
+    _settle_cluster(vm, qapp)
 
     assert face == 0
     rows = {r["name"]: r for r in vm.partsRows}
@@ -233,6 +245,65 @@ def test_pick_with_the_cluster_tool_splits_the_picked_parts_scope_by_colour():
     user_counts = sorted(r["faceCount"] for r in vm.partsRows if r["name"] != "Unassigned")
     assert user_counts == [1, 2]  # GREY alone + the two BROWN together
     assert sum(r["faceCount"] for r in vm.partsRows) == 3
+
+
+def test_cluster_runs_off_the_gui_thread_and_applies_when_it_lands(qapp):
+    """A cluster pick flips the clustering flag on at once and returns without
+    mutating the partition — the heavy k-means runs on a worker. The relabel is
+    applied (and the flag cleared) only when the worker's result lands on the GUI
+    thread, so the outliner / buffer never read a half-written partition."""
+    mesh, texture, centers = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    vm.activeTool = "cluster"
+    vm.clusterK = 2
+
+    vm.pick(49.5, 49.5, [centers[0][0], centers[0][1], 5.0],
+            [0.0, 0.0, -1.0], [0.0, 1.0, 0.0], 60.0, 100, 100)
+
+    assert vm.clustering is True   # in flight off the GUI thread
+    assert vm.hasParts is False    # not applied yet — no relabel before the worker returns
+
+    _settle_cluster(vm, qapp)
+
+    assert vm.clustering is False  # cleared when the relabel lands
+    assert vm.hasParts is True     # the split applied on the GUI thread
+
+
+def test_carve_input_is_dropped_while_a_cluster_is_in_flight(qapp):
+    """A cluster ties up the carve path for 1–3 s; further carve picks are ignored
+    until it lands (orbit stays free — that's the camera, not this slot). A pick made
+    mid-cluster returns −1 and carves nothing."""
+    mesh, texture, centers = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    vm.activeTool = "cluster"
+    _click(vm, centers[0])
+    assert vm.clustering is True
+
+    vm.activeTool = "wand"
+    vm.wandGlobal = True
+    dropped = _click(vm, centers[2])  # a carve attempt while the cluster is in flight
+
+    assert dropped == -1  # gated — the pick did not run
+    _settle_cluster(vm, qapp)
+
+
+def test_wand_and_brush_picks_stay_synchronous(qapp):
+    """Wand and brush are cheap, so they keep carving on the GUI thread — a pick
+    applies at once and never raises the clustering flag."""
+    mesh, texture, centers = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    wood = vm.createPart()
+    vm.activeTool = "wand"
+    vm.wandGlobal = True
+    vm.wandThreshold = 10.0
+
+    _click(vm, centers[0])  # no settle — wand carves synchronously
+
+    assert vm.clustering is False
+    assert {r["id"]: r for r in vm.partsRows}[wood]["faceCount"] == 2
 
 
 def test_selecting_a_part_makes_it_active_and_highlights_its_faces():
