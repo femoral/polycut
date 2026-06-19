@@ -62,7 +62,7 @@ def _patched(monkeypatch):
         gates["load"].wait()
         return model
 
-    def _export(out_model, out_path, **_kw):
+    def _export(out_model, out_path, *_a, **_kw):
         gates["export"].wait()
         return SimpleNamespace(
             output_path=Path(out_path), output_size_bytes=1,
@@ -71,7 +71,7 @@ def _patched(monkeypatch):
 
     monkeypatch.setattr(processor_module, "load_source_model", _load_src)
     monkeypatch.setattr(processor_module, "ModelSimplifier", lambda m: _GatedSimplifier(m, gates["simplify"]))
-    monkeypatch.setattr(processor_module, "export_collada", _export)
+    monkeypatch.setattr(processor_module, "export_model", _export)
     return Processor(), gates
 
 

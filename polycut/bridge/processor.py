@@ -26,13 +26,10 @@ from polycut.core import (
     PreserveOptions,
     Transform,
     build_mesh_buffers,
-    export_collada,
+    export_model,
     load_source_model,
-    remap_up_axis,
-    scale_factor,
-    scale_geometry,
 )
-from polycut.core.scale import UNIT_METERS, UNIT_NAMES, detect_source_unit
+from polycut.core.scale import UNIT_METERS, detect_source_unit
 
 DEFAULT_REDUCTION = 0.25  # keep ~25% of faces — the −75% default applied on load
 MIN_FACES = 100  # floor so the slider can't collapse the mesh to nothing
@@ -680,25 +677,16 @@ class Processor(QObject):
 
     def _export_worker(self, out: Path) -> None:
         try:
-            model = self._current()
-            # The carved Parts must travel with the export (#19 story 18). Scale +
-            # up-axis only move/rotate vertices — face count and order are preserved
-            # — so the partition's per-face labels stay valid on the exported mesh.
-            partition = self._parts.export_partition()
-            if partition is not None and len(partition.labels) != model.face_count:
-                partition = None  # stale (rebind failed) — fall back to one group
-            factor = scale_factor(
-                self._scale_multiplier, self._source_unit, self._target_unit
-            )
-            if factor != 1.0:
-                model = scale_geometry(model, factor)
-            model = remap_up_axis(model, self._up_axis)  # rotate upright ("y" no-op)
-            result = export_collada(
-                model,
+            # The whole transform→parts→export pipeline lives in core. The carved
+            # Parts travel with the export (#19 story 18): scale + up-axis only
+            # move/rotate vertices — face count and order are preserved — so the
+            # labels stay valid, and export_model drops a partition only if it no
+            # longer matches the mesh.
+            result = export_model(
+                self._current(),
                 out,
-                partition=partition,
-                unit_name=UNIT_NAMES[self._target_unit],
-                unit_meters=UNIT_METERS[self._target_unit],
+                self._transform(),
+                partition=self._parts.export_partition(),
             )
         except Exception as exc:
             self._set_busy(False)
