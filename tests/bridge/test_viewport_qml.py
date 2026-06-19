@@ -2,7 +2,7 @@
 
 This is the closest the render path gets to an automated check: loading the real
 ``Main.qml`` through the app engine (offscreen) proves the QtQuick3D import
-resolves, the Python ``MeshGeometry`` type is registered, the ``Theme`` tokens
+resolves, the Python ``BufferGeometry`` type is registered, the ``Theme`` tokens
 bind, and the viewport object is actually mounted. The shaded pixels and the
 orbit/pan/zoom feel remain HITL (#15) — no offscreen check can stand in for eyes.
 """

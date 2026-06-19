@@ -78,6 +78,18 @@ class _GatedSimplifier:
         pass
 
 
+def _tris(source):
+    """The source's current triangle count, or None before it has been fed."""
+    buffers = source.current()
+    return buffers.triangle_count if buffers else None
+
+
+def _verts(source):
+    """The source's current vertex count, or None before it has been fed."""
+    buffers = source.current()
+    return buffers.vertex_count if buffers else None
+
+
 def _wait(predicate, timeout=5.0):
     deadline = time.time() + timeout
     while not predicate() and time.time() < deadline:
@@ -101,11 +113,11 @@ def test_original_renders_immediately_without_waiting_for_the_cut(monkeypatch):
     proc.loadFile("a.obj")
 
     # The original appears before the (still-blocked) cut can finish.
-    assert _wait(lambda: proc.originalMesh.hasMesh), "original did not render on load"
-    assert proc.originalMesh.triangleCount == 2
-    assert proc.originalMesh.vertexCount == 4
+    assert _wait(lambda: proc.originalMesh.ready), "original did not render on load"
+    assert _tris(proc.originalMesh) == 2
+    assert _verts(proc.originalMesh) == 4
     assert proc.originalMesh.textureUrl.fileName() == "baked.png"
-    assert proc.simplifiedMesh.hasMesh is False  # simplified side waits for the cut
+    assert proc.simplifiedMesh.ready is False  # simplified side waits for the cut
 
     gate.set()  # let the cut finish so the worker thread can wind down
 
@@ -129,7 +141,7 @@ def test_simplifying_is_true_while_a_cut_runs_and_false_once_it_settles(monkeypa
 
     gate.set()  # the cut lands
     assert _wait(lambda: proc.simplifying is False), "still signalling after settle"
-    assert proc.simplifiedMesh.hasMesh is True  # the fresh mesh swapped in
+    assert proc.simplifiedMesh.ready is True  # the fresh mesh swapped in
 
 
 def test_original_stays_fixed_while_the_after_side_recuts(monkeypatch):
@@ -148,15 +160,15 @@ def test_original_stays_fixed_while_the_after_side_recuts(monkeypatch):
 
     proc = Processor()
     proc.loadFile("a.obj")  # default reduction → quad
-    assert _wait(lambda: proc.simplifiedMesh.triangleCount == 2)
+    assert _wait(lambda: _tris(proc.simplifiedMesh) == 2)
 
     # A more aggressive cut returns the triangle; the original must not move.
     proc._simplifier._result = triangle
     proc.simplify(1)
-    assert _wait(lambda: proc.simplifiedMesh.triangleCount == 1)
+    assert _wait(lambda: _tris(proc.simplifiedMesh) == 1)
 
-    assert proc.originalMesh.triangleCount == 2  # before side unchanged
-    assert proc.originalMesh.vertexCount == 4
+    assert _tris(proc.originalMesh) == 2  # before side unchanged
+    assert _verts(proc.originalMesh) == 4
 
 
 def test_opening_another_model_swaps_the_original(monkeypatch):
@@ -177,8 +189,8 @@ def test_opening_another_model_swaps_the_original(monkeypatch):
 
     proc = Processor()
     proc.loadFile("a.obj")
-    assert _wait(lambda: proc.originalMesh.triangleCount == 2)
+    assert _wait(lambda: _tris(proc.originalMesh) == 2)
 
     proc.loadFile("b.obj")
-    assert _wait(lambda: proc.originalMesh.triangleCount == 1)
-    assert proc.originalMesh.vertexCount == 3
+    assert _wait(lambda: _tris(proc.originalMesh) == 1)
+    assert _verts(proc.originalMesh) == 3

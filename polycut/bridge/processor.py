@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image
 from PySide6.QtCore import Property, QObject, QUrl, Signal, Slot
 
-from polycut.bridge.mesh_view import MeshView
+from polycut.bridge.buffer_source import BufferSource
 from polycut.bridge.parts_view import PartsViewModel
 from polycut.core import (
     UP_AXES,
@@ -82,12 +82,14 @@ class Processor(QObject):
         self._model = None  # the loaded original (source for re-simplify)
         self._simplified = None  # current decimated model; what export writes
         self._target = 0  # requested target face count
-        # The two mesh views the before/after split draws (#10): the original is
-        # fed once on load and renders immediately; the simplified is refreshed
+        # The two mesh buffer-sources the before/after split draws (#10): the original
+        # is fed once on load and renders immediately; the simplified is refreshed
         # off-thread each time a cut settles. Render is decoupled from the cut
-        # (ADR-0003) — the viewport never blocks on the CPU collapse.
-        self._original_mesh = MeshView(self)
-        self._simplified_mesh = MeshView(self)
+        # (ADR-0003) — the viewport never blocks on the CPU collapse. The feed pushes a
+        # pre-built buffer (see _feed_mesh_view), so the heavy interleave that built it
+        # never runs on the GUI thread when the source is read.
+        self._original_mesh = BufferSource(self)
+        self._simplified_mesh = BufferSource(self)
         # The Parts view-model (#25): the QML Parts panel binds to it. Rebound to the
         # simplified mesh on each settled cut, so Parts always carve the exact geometry
         # the exporter writes — and a re-cut clears Parts (their labels indexed the old
@@ -209,13 +211,13 @@ class Processor(QObject):
 
     hasModel = Property(bool, _get_has_model, notify=statsChanged)
 
-    def _get_original_mesh(self) -> MeshView:
+    def _get_original_mesh(self) -> BufferSource:
         """The original full-res mesh — fed on load, the before side (#10)."""
         return self._original_mesh
 
     originalMesh = Property(QObject, _get_original_mesh, constant=True)
 
-    def _get_simplified_mesh(self) -> MeshView:
+    def _get_simplified_mesh(self) -> BufferSource:
         """The simplified (after) side — the exact mesh the exporter writes (#10)."""
         return self._simplified_mesh
 

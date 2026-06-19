@@ -11,7 +11,6 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from polycut.bridge import Processor
-from polycut.bridge import mesh_geometry  # noqa: F401 — registers the QML MeshGeometry type
 from polycut.bridge import parts_geometry  # noqa: F401 — registers the QML PartsGeometry type
 from polycut.bridge import highlight_geometry  # noqa: F401 — registers the QML HighlightGeometry type
 from polycut.bridge import explode_geometry  # noqa: F401 — registers the QML ExplodeChunkGeometry type

@@ -20,7 +20,7 @@ Item {
     readonly property var simplified: processor.simplifiedMesh
     // The after side shows the last good cut; before the first cut lands it falls
     // back to the original so the split is never blank (chip reads "computing…").
-    readonly property var afterMesh: simplified && simplified.hasMesh ? simplified : original
+    readonly property var afterMesh: simplified && simplified.ready ? simplified : original
     readonly property bool textured: original && original.textureUrl.toString() !== ""
 
     // Up-axis remap (#12): the viewport shows the chosen orientation as an instant
@@ -46,7 +46,7 @@ Item {
     // Shaded · Edges · Wireframe — the render-style toggle (#9). State is owned by
     // the bridge so QML switches rendering off it. Each side's View3D draws the
     // mesh twice in one pass: a shaded solid (the fill) and the same vertices as a
-    // teal line set (the deduped triangle edges — MeshGeometry topology "lines").
+    // teal line set (the deduped triangle edges — BufferGeometry topology "lines").
     // Both share the one depth buffer, so the lines depth-test against the solid:
     // edges behind the surface are occluded instead of leaking through. Shaded =
     // fill only; Edges = fill + lines (topology on the solid); Wireframe = lines
@@ -71,7 +71,7 @@ Item {
     readonly property real renderModeNudge: renderMode === "edges" ? 0.0005
         : renderMode === "wireframe" ? 0.001 : 0
     // The same ProgressiveAA hold bites a fresh cut: the simplified geometry
-    // re-uploads (MeshGeometry.update marks the node dirty), but re-decimating at a
+    // re-uploads (BufferGeometry.update marks the node dirty), but re-decimating at a
     // new target or flipping a Preserve toggle isn't a camera change, so the after
     // side keeps its last converged frame until the next orbit. A projection tweak
     // (clipNear/FOV) doesn't reset the accumulator — only a real camera *transform*
@@ -189,8 +189,8 @@ Item {
             eulerRotation: root.upEuler
 
             Model {  // the shaded solid; hidden in Wireframe so only the lines show
-                visible: root.original && root.original.hasMesh && root.showFill
-                geometry: MeshGeometry { meshView: root.original }
+                visible: root.original && root.original.ready && root.showFill
+                geometry: BufferGeometry { source: root.original }
                 materials: PrincipledMaterial {
                     baseColor: Theme.fg1
                     baseColorMap: root.textured ? beforeTexture : null
@@ -198,9 +198,9 @@ Item {
                 }
             }
             Model {  // edges / wireframe: same vertices, depth-tested against the solid
-                visible: root.original && root.original.hasMesh && root.showWire
+                visible: root.original && root.original.ready && root.showWire
                 depthBias: root.lineDepthBias
-                geometry: MeshGeometry { meshView: root.original; topology: "lines" }
+                geometry: BufferGeometry { source: root.original; topology: "lines" }
                 materials: PrincipledMaterial {
                     // Neutral grey for plain topology — teal is reserved for the
                     // active-Part highlight (#30, design-system §3).
@@ -262,9 +262,9 @@ Item {
                     eulerRotation: root.upEuler
 
                     Model {  // the shaded solid — hidden while the Parts are exploded
-                        visible: root.afterMesh && root.afterMesh.hasMesh && root.showFill
+                        visible: root.afterMesh && root.afterMesh.ready && root.showFill
                                  && !root.explodeActive
-                        geometry: MeshGeometry { meshView: root.afterMesh }
+                        geometry: BufferGeometry { source: root.afterMesh }
                         materials: PrincipledMaterial {
                             baseColor: Theme.fg1
                             baseColorMap: root.textured ? afterTexture : null
@@ -272,10 +272,10 @@ Item {
                         }
                     }
                     Model {  // edges / wireframe lines, depth-tested against the solid
-                        visible: root.afterMesh && root.afterMesh.hasMesh && root.showWire
+                        visible: root.afterMesh && root.afterMesh.ready && root.showWire
                                  && !root.explodeActive
                         depthBias: root.lineDepthBias
-                        geometry: MeshGeometry { meshView: root.afterMesh; topology: "lines" }
+                        geometry: BufferGeometry { source: root.afterMesh; topology: "lines" }
                         materials: PrincipledMaterial {
                             baseColor: Theme.fg2  // plain topology grey; teal = highlight
                             lighting: PrincipledMaterial.NoLighting
@@ -364,7 +364,7 @@ Item {
             ShaderEffect {  // edge-detect the silhouette → teal contour over the after side
                 anchors.fill: parent
                 visible: processor.parts.hasHighlight && !root.explodeActive
-                         && root.afterMesh && root.afterMesh.hasMesh
+                         && root.afterMesh && root.afterMesh.ready
                 property var source: silhouetteSource
                 property vector2d texel: Qt.vector2d(width > 0 ? 1.0 / width : 0,
                                                      height > 0 ? 1.0 / height : 0)

@@ -93,9 +93,9 @@ def test_mesh_data_exposes_loaded_geometry_and_texture(monkeypatch):
     _wait_settled(proc)
 
     mesh = proc.simplifiedMesh
-    assert mesh.hasMesh is True
-    assert mesh.triangleCount == 2
-    assert mesh.vertexCount == 4
+    assert mesh.ready is True
+    assert mesh.current().triangle_count == 2
+    assert mesh.current().vertex_count == 4
     assert mesh.textureUrl.fileName() == "baked.png"
 
 
@@ -113,19 +113,21 @@ def test_mesh_data_tracks_the_latest_cut(monkeypatch):
     proc = Processor()
     proc.loadFile("a.obj")  # default reduction → quad (2 triangles)
     _wait_settled(proc)
-    assert proc.simplifiedMesh.triangleCount == 2
+    assert proc.simplifiedMesh.current().triangle_count == 2
 
     proc.simplify(1)  # a more aggressive cut → triangle (1 triangle)
     deadline = time.time() + 5.0
     while proc.busy and time.time() < deadline:
         time.sleep(0.005)
 
-    assert proc.simplifiedMesh.triangleCount == 1
-    assert proc.simplifiedMesh.vertexCount == 3
+    assert proc.simplifiedMesh.current().triangle_count == 1
+    assert proc.simplifiedMesh.current().vertex_count == 3
 
 
 def test_mesh_data_exposes_raw_buffers_for_the_geometry(monkeypatch):
-    """The geometry consumes the same bytes/stride/bounds the core builder emits."""
+    """The source produces the exact buffer the core builder emits (same
+    bytes/stride/bounds/layout), and exposes its bounds as the thin scalars QML binds
+    for camera framing."""
     quad = _quad_model("a.obj")
     monkeypatch.setattr(processor_module, "load_source_model", lambda p: quad)
     monkeypatch.setattr(
@@ -138,8 +140,6 @@ def test_mesh_data_exposes_raw_buffers_for_the_geometry(monkeypatch):
 
     mesh = proc.simplifiedMesh
     expected = build_mesh_buffers(quad)
-    assert bytes(mesh.vertexData()) == expected.vertex_data
-    assert bytes(mesh.indexData()) == expected.index_data
-    assert mesh.stride == expected.stride
+    assert mesh.current() == expected  # the buffer the source yields, through current()
     assert (mesh.boundsMin.x(), mesh.boundsMin.y(), mesh.boundsMin.z()) == expected.bounds_min
     assert (mesh.boundsMax.x(), mesh.boundsMax.y(), mesh.boundsMax.z()) == expected.bounds_max
