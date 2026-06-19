@@ -281,19 +281,6 @@ Item {
                             lighting: PrincipledMaterial.NoLighting
                         }
                     }
-                    Model {  // active-Part outline (#30): teal lines over the fused mesh,
-                             // depth-tested so faces behind the surface don't bleed through.
-                             // Shown in shaded / edges / wireframe; parts mode (the after
-                             // side is hidden there) keeps its own brighten-toward-white.
-                        visible: root.afterMesh && root.afterMesh.hasMesh
-                                 && processor.parts.hasHighlight && !root.explodeActive
-                        depthBias: root.lineDepthBias
-                        geometry: HighlightGeometry { partsModel: processor.parts }
-                        materials: PrincipledMaterial {
-                            baseColor: Theme.teal
-                            lighting: PrincipledMaterial.NoLighting
-                        }
-                    }
                     // Explode (#31): one node per Part, translated by its cached offset ×
                     // amount, replacing the fused base while Space is held. Each chunk draws
                     // its fill + topology lines so it reads in shaded / edges / wireframe.
@@ -328,6 +315,62 @@ Item {
                     }
                 }
                 Texture { id: afterTexture; source: root.afterMesh ? root.afterMesh.textureUrl : "" }
+            }
+
+            // ---- active-Part contour highlight (#30) -------------------
+            // An offscreen pass draws just the active Part's faces flat teal on a
+            // transparent background; contour.frag edge-detects the projected
+            // silhouette and draws a teal ring around it — a topology-independent
+            // outline that reads even on the half-disconnected Meshy cut, where an
+            // edge-based outline would just be a wireframe. Aligned with afterBase
+            // (same camera + size, inside the same clip), so it tracks the after side.
+            View3D {
+                id: silhouetteView
+                anchors.fill: parent
+                camera: silhouetteCamera
+                environment: SceneEnvironment {
+                    backgroundMode: SceneEnvironment.Transparent  // only the Part is opaque
+                    antialiasingMode: SceneEnvironment.MSAA  // a crisp, always-current mask
+                    antialiasingQuality: SceneEnvironment.High
+                }
+                PerspectiveCamera {  // mirror the shared camera, like afterCamera
+                    id: silhouetteCamera
+                    position: camera.scenePosition
+                    rotation: camera.sceneRotation
+                    fieldOfView: camera.fieldOfView
+                    clipNear: camera.clipNear
+                }
+                Node {  // same render-time up-axis rotation as the after side
+                    pivot: root.modelCenter
+                    eulerRotation: root.upEuler
+                    Model {  // the active Part's faces, flat teal
+                        visible: processor.parts.hasHighlight && !root.explodeActive
+                        geometry: HighlightGeometry { partsModel: processor.parts }
+                        materials: PrincipledMaterial {
+                            baseColor: Theme.teal
+                            lighting: PrincipledMaterial.NoLighting
+                        }
+                    }
+                }
+            }
+            ShaderEffectSource {  // capture the silhouette as a texture; don't draw it directly
+                id: silhouetteSource
+                anchors.fill: parent
+                sourceItem: silhouetteView
+                hideSource: true
+                live: true
+                visible: false
+            }
+            ShaderEffect {  // edge-detect the silhouette → teal contour over the after side
+                anchors.fill: parent
+                visible: processor.parts.hasHighlight && !root.explodeActive
+                         && root.afterMesh && root.afterMesh.hasMesh
+                property var source: silhouetteSource
+                property vector2d texel: Qt.vector2d(width > 0 ? 1.0 / width : 0,
+                                                     height > 0 ? 1.0 / height : 0)
+                property real thickness: 1.5  // contour reach, in source pixels
+                property color outline: Theme.teal
+                fragmentShader: "contour.frag.qsb"
             }
         }
     }

@@ -1,14 +1,14 @@
-"""The QtQuick3D geometry node for the active-Part outline overlay (#30).
+"""The QtQuick3D geometry node for the active-Part highlight silhouette (#30).
 
-Mirror of :class:`~polycut.bridge.parts_geometry.PartsGeometry`, but a Lines
-primitive: it binds to the :class:`~polycut.bridge.parts_view.PartsViewModel` and
-uploads the active Part's outline — a position-only vertex buffer (the fused mesh's
-own vertices) plus the Part's edge indices
-(:func:`polycut.core.viewport.build_highlight_buffers`). ``Viewport.qml`` draws it
-as a teal, depth-tested line set over the fused mesh in shaded / edges / wireframe,
-so the active Part reads across every render mode. Re-uploads whenever the highlight
-moves (a carve or a selection change); empty when Unassigned is the edit target. No
-geometry maths here — only the GPU wiring.
+Mirror of :class:`~polycut.bridge.parts_geometry.PartsGeometry`: it binds to the
+:class:`~polycut.bridge.parts_view.PartsViewModel` and uploads the active Part's
+**faces** — a position-only vertex buffer (the fused mesh's own vertices) plus the
+Part's triangle indices (:func:`polycut.core.viewport.build_highlight_buffers`).
+``Viewport.qml`` draws it flat into an offscreen mask whose screen-space edge becomes
+a teal contour around the projected Part — a topology-independent outline that reads
+even on the half-disconnected Meshy cut. Re-uploads whenever the highlight moves (a
+carve or a selection change); empty when Unassigned is the edit target. No geometry
+maths here — only the GPU wiring.
 """
 
 from __future__ import annotations
@@ -54,7 +54,8 @@ class HighlightGeometry(QQuick3DGeometry):
     )
 
     def _rebuild(self) -> None:
-        """Re-upload the active Part's outline edges to the GPU as a Lines primitive."""
+        """Re-upload the active Part's faces to the GPU as a Triangles primitive — the
+        silhouette the offscreen mask pass draws."""
         self.clear()
         model = self._parts_model
         if model is None or not model.highlightReady:
@@ -63,9 +64,9 @@ class HighlightGeometry(QQuick3DGeometry):
 
         self.setStride(model.highlightStride)
         self.setVertexData(model.highlightVertexData())
-        self.setIndexData(model.highlightLineData())
+        self.setIndexData(model.highlightIndexData())
         self.addAttribute(_Semantic.PositionSemantic, _POSITION_OFFSET, _F32)
         self.addAttribute(_Semantic.IndexSemantic, 0, _U32)
-        self.setPrimitiveType(QQuick3DGeometry.PrimitiveType.Lines)
+        self.setPrimitiveType(QQuick3DGeometry.PrimitiveType.Triangles)
         self.setBounds(model.highlightBoundsMin, model.highlightBoundsMax)
         self.update()

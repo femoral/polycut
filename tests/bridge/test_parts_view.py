@@ -350,12 +350,10 @@ def test_has_highlight_is_true_only_for_a_real_active_part():
     assert vm.hasHighlight is False
 
 
-def test_highlight_geometry_outlines_the_active_parts_faces():
-    """The overlay geometry holds exactly the active Part's outline edges — so the
-    viewport can draw a teal outline of its faces over the fused mesh in shaded /
-    edges / wireframe. It stands down (not ready) when Unassigned is active."""
-    from polycut.core.viewport import build_highlight_lines
-
+def test_highlight_silhouette_is_the_active_parts_faces():
+    """The highlight geometry holds exactly the active Part's faces — the surface the
+    offscreen pass draws into the mask, whose screen-space edge becomes the teal
+    contour. It stands down (not ready) when Unassigned is active."""
     mesh, texture, centers = _pick_mesh()
     vm = PartsViewModel()
     vm.rebind(mesh, texture)
@@ -366,11 +364,13 @@ def test_highlight_geometry_outlines_the_active_parts_faces():
     _click(vm, centers[0])  # paint the two BROWN faces (0, 1) into wood
 
     assert vm.highlightReady is True
-    pairs = np.frombuffer(vm.highlightLineData(), np.uint32).reshape(-1, 2)
-    expected = {tuple(int(v) for v in e) for e in build_highlight_lines(mesh, [0, 1])}
-    assert {tuple(int(v) for v in p) for p in pairs} == expected
+    tris = np.frombuffer(vm.highlightIndexData(), np.uint32).reshape(-1, 3)
+    assert {tuple(int(v) for v in t) for t in tris} == {
+        tuple(int(v) for v in mesh.faces[0]),
+        tuple(int(v) for v in mesh.faces[1]),
+    }  # exactly the active Part's faces
 
-    vm.activePartId = 0  # Unassigned — the overlay stands down
+    vm.activePartId = 0  # Unassigned — the silhouette stands down
     assert vm.highlightReady is False
 
 

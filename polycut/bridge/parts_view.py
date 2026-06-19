@@ -407,10 +407,11 @@ class PartsViewModel(QObject):
         buffers = self._ensure_geometry()
         return QByteArray(buffers.index_data) if buffers else QByteArray()
 
-    # ---- active-Part outline overlay (the cross-mode highlight, #30) ----
-    # A teal line set of the active Part's edges, drawn over the fused mesh in shaded /
-    # edges / wireframe (parts mode keeps its own brighten-toward-white). Reuses the
-    # fused mesh's positions so the lines lie on the surface; rebuilt lazily with the
+    # ---- active-Part highlight silhouette (the cross-mode contour, #30) ----
+    # The active Part's faces, drawn flat into an offscreen mask whose screen-space
+    # edge becomes a teal contour over the fused mesh in shaded / edges / wireframe
+    # (parts mode keeps its own brighten-toward-white). Topology-independent — reads as
+    # an outline even on the half-disconnected Meshy cut. Rebuilt lazily with the
     # highlight and stood down (no buffers) whenever Unassigned is the edit target.
     def _ensure_highlight(self):
         if self._highlight_buffers is None and self._mesh is not None and self._has_highlight():
@@ -443,13 +444,13 @@ class PartsViewModel(QObject):
 
     @Slot(result=QByteArray)
     def highlightVertexData(self) -> QByteArray:
-        """The position-only vertex buffer the outline overlay uploads."""
+        """The position-only vertex buffer the silhouette pass uploads."""
         buffers = self._ensure_highlight()
         return QByteArray(buffers.vertex_data) if buffers else QByteArray()
 
     @Slot(result=QByteArray)
-    def highlightLineData(self) -> QByteArray:
-        """The active Part's edge-index buffer (low→high pairs) for the Lines pass."""
+    def highlightIndexData(self) -> QByteArray:
+        """The active Part's triangle-index buffer — the silhouette faces."""
         buffers = self._ensure_highlight()
         return QByteArray(buffers.index_data) if buffers else QByteArray()
 
