@@ -345,7 +345,7 @@ Item {
                     eulerRotation: root.upEuler
                     Model {  // the active Part's faces, flat teal
                         visible: processor.parts.hasHighlight && !root.explodeActive
-                        geometry: HighlightGeometry { partsModel: processor.parts }
+                        geometry: BufferGeometry { source: processor.parts.highlightSource }
                         materials: PrincipledMaterial {
                             baseColor: Theme.teal
                             lighting: PrincipledMaterial.NoLighting
@@ -412,8 +412,8 @@ Item {
             eulerRotation: root.upEuler
 
             Model {
-                visible: processor.parts.geometryReady && !root.explodeActive
-                geometry: PartsGeometry { partsModel: processor.parts }
+                visible: processor.parts.partsSource.ready && !root.explodeActive
+                geometry: BufferGeometry { source: processor.parts.partsSource }
                 materials: PrincipledMaterial {
                     vertexColorsEnabled: true       // each vertex draws its Part colour
                     baseColor: Theme.white          // identity — the vertex colour shows true

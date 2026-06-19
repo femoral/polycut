@@ -26,6 +26,7 @@ import numpy as np
 from PySide6.QtCore import Property, QByteArray, QObject, Signal, Slot
 from PySide6.QtGui import QVector3D
 
+from polycut.bridge.buffer_source import BufferSource
 from polycut.core.brush import SpatialBrush
 from polycut.core.parts import UNASSIGNED_ID, Partition
 from polycut.core.picking import add_to_part, colour_wand, pick_face, screen_ray
@@ -56,8 +57,12 @@ class PartsViewModel(QObject):
         self._texture = None
         self._partition: Partition | None = None
         self._brush: SpatialBrush | None = None  # centroid KD-tree, rebuilt per mesh
-        self._buffers = None  # cached flat-colour Parts buffer; rebuilt lazily on carve
-        self._highlight_buffers = None  # cached active-Part outline; rebuilt with the highlight
+        # The flat-colour Parts buffer and the active-Part silhouette flow through the
+        # one shared buffer-source seam: each is armed with a lazy builder, and a carve
+        # or selection change re-arms it (drops the memo) so the next read rebuilds.
+        # Built on the GUI thread (an on-thread lazy build is allowed by the seam).
+        self._parts_source = BufferSource(self)
+        self._highlight_source = BufferSource(self)
         self._chunks = None  # cached per-Part explode chunks; rebuilt once per carve
         self._last_brush_point = None  # previous brush hit in a drag, for stroke fill-in
         self._active_part = UNASSIGNED_ID  # edits target the remainder until a Part exists
@@ -356,103 +361,48 @@ class PartsViewModel(QObject):
 
     hasParts = Property(bool, _get_has_parts, notify=partsChanged)
 
-    # ---- flat-colour Parts geometry (the "parts" view mode) ------------
-    # The viewport's flat-colour mode draws the simplified mesh with each face in
-    # its Part's swatch colour. The buffer (positions + per-vertex RGBA) is built in
-    # ``core`` and cached here, rebuilt lazily the next time QML reads it after a
-    # carve / visibility change — so a brush drag invalidates once, not per query.
+    # ---- flat-colour Parts + highlight buffer sources ------------------
+    # The flat-colour Parts view (each face in its Part's swatch colour) and the
+    # active-Part silhouette (#30, drawn flat into a mask whose screen-space edge
+    # becomes the teal contour) both flow through the one shared buffer-source seam.
+    # A carve / selection / visibility change re-arms the sources (drops their memo);
+    # the next read rebuilds once, which is why no per-property cache is needed.
     def _invalidate_geometry(self) -> None:
-        self._buffers = None
-        self._highlight_buffers = None  # the outline follows the same carves/selection
+        """Re-arm the Parts + highlight buffer sources and drop the cached explode
+        chunks, so the next read of each rebuilds against the current carve/selection."""
         self._chunks = None  # the explode chunks are rebuilt on the next carve
-        self.geometryChanged.emit()
+        self._parts_source.bind(self._build_parts)  # re-arm → the adapter re-uploads
+        self._highlight_source.bind(self._build_highlight)
+        self.geometryChanged.emit()  # the explode chunk count / nodes still read here
 
-    def _ensure_geometry(self):
-        if self._buffers is None and self._mesh is not None and self._partition is not None:
-            self._buffers = build_part_buffers(self._mesh, self._partition, self._active_part)
-        return self._buffers
+    def _build_parts(self):
+        """Build the flat-colour Parts buffer (position + per-vertex RGBA) for the
+        current carve, or ``None`` before a mesh is bound. Run lazily on the GUI thread
+        when the source is first read after a re-arm."""
+        if self._mesh is None or self._partition is None:
+            return None
+        return build_part_buffers(self._mesh, self._partition, self._active_part)
 
-    def _get_geometry_ready(self) -> bool:
-        return self._ensure_geometry() is not None
+    def _build_highlight(self):
+        """Build the active Part's silhouette faces (position-only), or ``None`` when
+        Unassigned is the edit target — the contour stands down for the remainder.
+        Topology-independent, so it reads even on the half-disconnected Meshy cut."""
+        if self._mesh is None or not self._has_highlight():
+            return None
+        face_ids = (self._partition.labels == self._active_part).nonzero()[0]
+        return build_highlight_buffers(self._mesh, face_ids)
 
-    geometryReady = Property(bool, _get_geometry_ready, notify=geometryChanged)
+    def _get_parts_source(self) -> BufferSource:
+        """The flat-colour Parts buffer source the viewport's parts-mode node binds."""
+        return self._parts_source
 
-    def _get_geometry_stride(self) -> int:
-        buffers = self._ensure_geometry()
-        return buffers.stride if buffers else 0
+    partsSource = Property(QObject, _get_parts_source, constant=True)
 
-    geometryStride = Property(int, _get_geometry_stride, notify=geometryChanged)
+    def _get_highlight_source(self) -> BufferSource:
+        """The active-Part silhouette buffer source the contour pass binds."""
+        return self._highlight_source
 
-    def _get_geometry_bounds_min(self) -> QVector3D:
-        buffers = self._ensure_geometry()
-        return QVector3D(*buffers.bounds_min) if buffers else QVector3D()
-
-    geometryBoundsMin = Property(QVector3D, _get_geometry_bounds_min, notify=geometryChanged)
-
-    def _get_geometry_bounds_max(self) -> QVector3D:
-        buffers = self._ensure_geometry()
-        return QVector3D(*buffers.bounds_max) if buffers else QVector3D()
-
-    geometryBoundsMax = Property(QVector3D, _get_geometry_bounds_max, notify=geometryChanged)
-
-    @Slot(result=QByteArray)
-    def geometryVertexData(self) -> QByteArray:
-        """The interleaved position + RGBA buffer the Parts geometry uploads."""
-        buffers = self._ensure_geometry()
-        return QByteArray(buffers.vertex_data) if buffers else QByteArray()
-
-    @Slot(result=QByteArray)
-    def geometryIndexData(self) -> QByteArray:
-        """The triangle index buffer the Parts geometry uploads."""
-        buffers = self._ensure_geometry()
-        return QByteArray(buffers.index_data) if buffers else QByteArray()
-
-    # ---- active-Part highlight silhouette (the cross-mode contour, #30) ----
-    # The active Part's faces, drawn flat into an offscreen mask whose screen-space
-    # edge becomes a teal contour over the fused mesh in shaded / edges / wireframe
-    # (parts mode keeps its own brighten-toward-white). Topology-independent — reads as
-    # an outline even on the half-disconnected Meshy cut. Rebuilt lazily with the
-    # highlight and stood down (no buffers) whenever Unassigned is the edit target.
-    def _ensure_highlight(self):
-        if self._highlight_buffers is None and self._mesh is not None and self._has_highlight():
-            face_ids = (self._partition.labels == self._active_part).nonzero()[0]
-            self._highlight_buffers = build_highlight_buffers(self._mesh, face_ids)
-        return self._highlight_buffers if self._has_highlight() else None
-
-    def _get_highlight_ready(self) -> bool:
-        return self._ensure_highlight() is not None
-
-    highlightReady = Property(bool, _get_highlight_ready, notify=highlightChanged)
-
-    def _get_highlight_stride(self) -> int:
-        buffers = self._ensure_highlight()
-        return buffers.stride if buffers else 0
-
-    highlightStride = Property(int, _get_highlight_stride, notify=highlightChanged)
-
-    def _get_highlight_bounds_min(self) -> QVector3D:
-        buffers = self._ensure_highlight()
-        return QVector3D(*buffers.bounds_min) if buffers else QVector3D()
-
-    highlightBoundsMin = Property(QVector3D, _get_highlight_bounds_min, notify=highlightChanged)
-
-    def _get_highlight_bounds_max(self) -> QVector3D:
-        buffers = self._ensure_highlight()
-        return QVector3D(*buffers.bounds_max) if buffers else QVector3D()
-
-    highlightBoundsMax = Property(QVector3D, _get_highlight_bounds_max, notify=highlightChanged)
-
-    @Slot(result=QByteArray)
-    def highlightVertexData(self) -> QByteArray:
-        """The position-only vertex buffer the silhouette pass uploads."""
-        buffers = self._ensure_highlight()
-        return QByteArray(buffers.vertex_data) if buffers else QByteArray()
-
-    @Slot(result=QByteArray)
-    def highlightIndexData(self) -> QByteArray:
-        """The active Part's triangle-index buffer — the silhouette faces."""
-        buffers = self._ensure_highlight()
-        return QByteArray(buffers.index_data) if buffers else QByteArray()
+    highlightSource = Property(QObject, _get_highlight_source, constant=True)
 
     # ---- per-Part explode chunks (#31) ---------------------------------
     # The momentary explode draws the simplified mesh as one node per Part, each

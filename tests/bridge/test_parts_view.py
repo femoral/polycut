@@ -363,15 +363,35 @@ def test_highlight_silhouette_is_the_active_parts_faces():
     vm.wandThreshold = 10.0
     _click(vm, centers[0])  # paint the two BROWN faces (0, 1) into wood
 
-    assert vm.highlightReady is True
-    tris = np.frombuffer(vm.highlightIndexData(), np.uint32).reshape(-1, 3)
+    assert vm.highlightSource.ready is True
+    tris = np.frombuffer(vm.highlightSource.current().index_data, np.uint32).reshape(-1, 3)
     assert {tuple(int(v) for v in t) for t in tris} == {
         tuple(int(v) for v in mesh.faces[0]),
         tuple(int(v) for v in mesh.faces[1]),
     }  # exactly the active Part's faces
 
     vm.activePartId = 0  # Unassigned — the silhouette stands down
-    assert vm.highlightReady is False
+    assert vm.highlightSource.ready is False
+
+
+def test_parts_source_yields_the_flat_colour_buffer_for_the_carve():
+    """The parts-mode node binds the Parts buffer source; its ``current()`` is the
+    flat-colour buffer the core builder emits for the live carve + active Part — and a
+    carve re-arms it, so the next read reflects the new colours."""
+    from polycut.core.viewport import build_part_buffers
+
+    mesh, texture, centers = _pick_mesh()
+    vm = PartsViewModel()
+    vm.rebind(mesh, texture)
+    wood = vm.createPart()
+    vm.activeTool = "wand"
+    vm.wandGlobal = True
+    vm.wandThreshold = 10.0
+    _click(vm, centers[0])  # carve the two BROWN faces into wood
+
+    expected = build_part_buffers(mesh, vm.export_partition(), vm.activePartId)
+    assert vm.partsSource.ready is True
+    assert vm.partsSource.current() == expected  # the buffer the source yields
 
 
 def test_explode_chunks_decompose_the_mesh_per_part_with_offsets():
