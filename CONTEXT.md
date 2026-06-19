@@ -23,6 +23,10 @@ An interior designer who builds client preview scenes in SketchUp and renders th
 Reduce a Source model's polygon count enough for SketchUp to stay responsive, while the baked texture survives without smearing or warping and the silhouette still reads correctly. The core MVP-1 operation.
 _Avoid_: decimate, reduce, optimize (use "simplify" in UI and discussion)
 
+**Transform**:
+The scale multiplier + source/target units + up-axis the designer sets to size and orient the model for SketchUp. Baked into the geometry at export, with the target unit also declared in the Collada `<unit>` metadata. The `transform` stage of `simplify → transform → parts → export` (ADR-0004); grouped under the UI's Transform panel. The model's real-world size magnitude is invariant to up-axis (rotation only permutes which extent maps to which axis).
+_Avoid_: orient, scale, resize (the bundle is "Transform"; the pieces are scale / units / up-axis)
+
 **Plasticky shine**:
 The over-glossy default surface look baked into Meshy exports that reads as fake/plastic once in SketchUp or Enscape. The main material complaint, distinct from missing or stretched textures.
 

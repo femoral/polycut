@@ -18,6 +18,7 @@ from polycut.core.picking import (
 )
 from polycut.core.scale import scale_factor, scale_geometry
 from polycut.core.segment import face_colours, segment, split_by_colour
+from polycut.core.transform import Transform
 from polycut.core.simplify import ModelSimplifier, PreserveOptions, simplify_model
 from polycut.core.viewport import (
     MeshBuffers,
@@ -38,6 +39,7 @@ __all__ = [
     "SceneObject",
     "SourceModel",
     "SpatialBrush",
+    "Transform",
     "UNASSIGNED_ID",
     "UP_AXES",
     "add_to_part",
