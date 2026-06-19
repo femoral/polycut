@@ -24,6 +24,7 @@ from polycut.core import (
     UP_AXES,
     ModelSimplifier,
     PreserveOptions,
+    Transform,
     build_mesh_buffers,
     export_collada,
     load_source_model,
@@ -641,15 +642,27 @@ class Processor(QObject):
         bool, _get_preserve_hard_edges, _set_preserve_hard_edges, notify=preserveChanged
     )
 
+    def _transform(self) -> Transform:
+        """The Transform the four scale/units/up-axis fields describe — the single
+        source of the bundle, so the size readout and the export can't diverge on it."""
+        return Transform(
+            multiplier=self._scale_multiplier,
+            source_unit=self._source_unit,
+            target_unit=self._target_unit,
+            up_axis=self._up_axis,
+        )
+
     def _get_scaled_dimensions(self) -> str:
-        """The model's resulting real-world size in the target unit — the §7 delta."""
+        """The model's resulting real-world size in the target unit — the §7 delta.
+
+        The size itself comes from the Transform (the same bundle export bakes); the
+        bridge keeps only the presentation — significant figures, the × sign, the
+        unit suffix."""
         model = self._current()
         if model is None:
             return ""
-        factor = scale_factor(self._scale_multiplier, self._source_unit, self._target_unit)
-        lo, hi = model.geometry.bounds
-        ext = (hi - lo) * factor
-        return f"{ext[0]:.3g} × {ext[1]:.3g} × {ext[2]:.3g} {self._target_unit}"
+        x, y, z = self._transform().dimensions(model)
+        return f"{x:.3g} × {y:.3g} × {z:.3g} {self._target_unit}"
 
     scaledDimensions = Property(str, _get_scaled_dimensions, notify=scaleChanged)
 

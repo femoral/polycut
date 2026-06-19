@@ -67,6 +67,30 @@ def _load(proc, path="couch.obj", timeout=5.0):
         time.sleep(0.005)
 
 
+def test_scaled_dimensions_empty_without_a_model():
+    """No model loaded → the size readout is blank, nothing to size."""
+    assert Processor().scaledDimensions == ""
+
+
+def test_scaled_dimensions_reports_the_baked_size_in_the_target_unit():
+    """The readout is the model's real-world extents in the target unit — a 1×2×3 m
+    box read out in centimetres reports 100 × 200 × 300 cm."""
+    proc = Processor()
+    proc._model = _box_model("couch.obj", extents=(1.0, 2.0, 3.0))
+    proc.targetUnit = "cm"  # m→cm is ×100
+
+    assert proc.scaledDimensions == "100 × 200 × 300 cm"
+
+
+def test_scaled_dimensions_follows_the_multiplier():
+    """The free multiplier rides on top of the unit factor in the readout."""
+    proc = Processor()
+    proc._model = _box_model("couch.obj", extents=(1.0, 2.0, 3.0))
+    proc.scaleMultiplier = 2.0  # source/target both metres → ×2
+
+    assert proc.scaledDimensions == "2 × 4 × 6 m"
+
+
 def test_up_axis_defaults_to_y():
     """A fresh transform is Y-up — the no-op identity (Meshy's usual orientation)."""
     assert Processor().upAxis == "y"
