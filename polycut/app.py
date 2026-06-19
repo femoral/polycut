@@ -11,8 +11,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from polycut.bridge import Processor
-from polycut.bridge import explode_geometry  # noqa: F401 — registers the QML ExplodeChunkGeometry type
-from polycut.bridge import buffer_geometry  # noqa: F401 — registers the QML BufferGeometry type
+from polycut.bridge import buffer_geometry  # noqa: F401 — registers the one QML BufferGeometry type
 from polycut.resources import base_dir, ui_dir
 
 UI_DIR = ui_dir()

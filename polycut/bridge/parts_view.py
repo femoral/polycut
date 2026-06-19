@@ -23,7 +23,7 @@ from __future__ import annotations
 import threading
 
 import numpy as np
-from PySide6.QtCore import Property, QByteArray, QObject, Signal, Slot
+from PySide6.QtCore import Property, QObject, Signal, Slot
 from PySide6.QtGui import QVector3D
 
 from polycut.bridge.buffer_source import BufferSource
@@ -64,6 +64,7 @@ class PartsViewModel(QObject):
         self._parts_source = BufferSource(self)
         self._highlight_source = BufferSource(self)
         self._chunks = None  # cached per-Part explode chunks; rebuilt once per carve
+        self._chunk_sources = []  # one buffer-source per chunk, rebuilt with the chunks
         self._last_brush_point = None  # previous brush hit in a drag, for stroke fill-in
         self._active_part = UNASSIGNED_ID  # edits target the remainder until a Part exists
         self._active_tool = "cluster"  # the first manual tool in the panel
@@ -371,6 +372,7 @@ class PartsViewModel(QObject):
         """Re-arm the Parts + highlight buffer sources and drop the cached explode
         chunks, so the next read of each rebuilds against the current carve/selection."""
         self._chunks = None  # the explode chunks are rebuilt on the next carve
+        self._chunk_sources = []  # their per-chunk sources rebuild alongside them
         self._parts_source.bind(self._build_parts)  # re-arm → the adapter re-uploads
         self._highlight_source.bind(self._build_highlight)
         self.geometryChanged.emit()  # the explode chunk count / nodes still read here
@@ -407,18 +409,34 @@ class PartsViewModel(QObject):
     # ---- per-Part explode chunks (#31) ---------------------------------
     # The momentary explode draws the simplified mesh as one node per Part, each
     # translated by its radial offset × the live amount. The chunks are built once per
-    # carve and cached (no per-tick buffer re-upload); the viewport reads them by index
-    # through a Repeater3D. Each chunk reuses the fused normals/UVs, so it shades and
-    # textures exactly like the assembled mesh in every render mode.
+    # carve and cached (no per-tick buffer re-upload); each chunk's upload buffer flows
+    # through its own buffer-source (the same shared seam the mesh/parts nodes use), so
+    # the explode Repeater binds the one generic adapter per chunk. The node-placement
+    # values (count, offset, swatch colour, id) stay as direct reads — they are not
+    # upload data. Each chunk reuses the fused normals/UVs, shading like the mesh.
     def _ensure_chunks(self) -> list:
         if self._chunks is None and self._mesh is not None and self._partition is not None:
             self._chunks = build_part_chunks(self._mesh, self._partition)
+            self._chunk_sources = [self._chunk_source(c) for c in self._chunks]
         return self._chunks or []
+
+    def _chunk_source(self, chunk) -> BufferSource:
+        """A buffer-source pre-loaded with one chunk's already-built upload buffer."""
+        source = BufferSource(self)
+        source.update(chunk.buffers)  # pre-built push (built on this GUI thread)
+        return source
 
     def _get_chunk_count(self) -> int:
         return len(self._ensure_chunks())
 
     chunkCount = Property(int, _get_chunk_count, notify=geometryChanged)
+
+    @Slot(int, result=QObject)
+    def chunkSource(self, index: int) -> QObject:
+        """The chunk's buffer-source — the explode Repeater binds the generic adapter
+        to it, with the triangles/lines topology set on the adapter per pass."""
+        self._ensure_chunks()
+        return self._chunk_sources[index]
 
     @Slot(int, result=int)
     def chunkPartId(self, index: int) -> int:
@@ -433,30 +451,3 @@ class PartsViewModel(QObject):
     def chunkColour(self, index: int) -> list:
         """The chunk's Part swatch RGB — the flat colour the parts render mode draws."""
         return [int(c) for c in self._ensure_chunks()[index].colour]
-
-    @Slot(int, result=int)
-    def chunkStride(self, index: int) -> int:
-        return self._ensure_chunks()[index].stride
-
-    @Slot(int, result=QVector3D)
-    def chunkBoundsMin(self, index: int) -> QVector3D:
-        return QVector3D(*self._ensure_chunks()[index].bounds_min)
-
-    @Slot(int, result=QVector3D)
-    def chunkBoundsMax(self, index: int) -> QVector3D:
-        return QVector3D(*self._ensure_chunks()[index].bounds_max)
-
-    @Slot(int, result=QByteArray)
-    def chunkVertexData(self, index: int) -> QByteArray:
-        """The chunk's interleaved position/normal/UV buffer (gathered, fused-quality)."""
-        return QByteArray(self._ensure_chunks()[index].vertex_data)
-
-    @Slot(int, result=QByteArray)
-    def chunkTriangleData(self, index: int) -> QByteArray:
-        """The chunk's remapped triangle index buffer."""
-        return QByteArray(self._ensure_chunks()[index].index_data)
-
-    @Slot(int, result=QByteArray)
-    def chunkLineData(self, index: int) -> QByteArray:
-        """The chunk's remapped unique-edge buffer, for the edges / wireframe pass."""
-        return QByteArray(self._ensure_chunks()[index].line_index_data)

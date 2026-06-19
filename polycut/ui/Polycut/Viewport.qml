@@ -291,8 +291,8 @@ Item {
                             position: processor.parts.chunkOffset(index).times(root.explodeAmount)
                             Model {  // chunk fill
                                 visible: root.showFill
-                                geometry: ExplodeChunkGeometry {
-                                    partsModel: processor.parts; chunkIndex: index; topology: "triangles"
+                                geometry: BufferGeometry {
+                                    source: processor.parts.chunkSource(index); topology: "triangles"
                                 }
                                 materials: PrincipledMaterial {
                                     baseColor: Theme.fg1
@@ -303,8 +303,8 @@ Item {
                             Model {  // chunk edges / wireframe lines
                                 visible: root.showWire
                                 depthBias: root.lineDepthBias
-                                geometry: ExplodeChunkGeometry {
-                                    partsModel: processor.parts; chunkIndex: index; topology: "lines"
+                                geometry: BufferGeometry {
+                                    source: processor.parts.chunkSource(index); topology: "lines"
                                 }
                                 materials: PrincipledMaterial {
                                     baseColor: Theme.fg2
@@ -433,8 +433,8 @@ Item {
                     required property int index
                     position: processor.parts.chunkOffset(index).times(root.explodeAmount)
                     Model {
-                        geometry: ExplodeChunkGeometry {
-                            partsModel: processor.parts; chunkIndex: index; topology: "triangles"
+                        geometry: BufferGeometry {
+                            source: processor.parts.chunkSource(index); topology: "triangles"
                         }
                         materials: PrincipledMaterial {
                             baseColor: {

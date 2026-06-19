@@ -420,8 +420,9 @@ def test_explode_chunks_decompose_the_mesh_per_part_with_offsets():
         np.testing.assert_allclose(
             [off.x(), off.y(), off.z()], reference[pid].offset, atol=1e-5
         )
-        assert len(vm.chunkVertexData(i)) > 0  # carries its gathered vertices
-        assert len(vm.chunkTriangleData(i)) > 0  # and its remapped triangles
+        buffers = vm.chunkSource(i).current()  # the chunk's upload buffer, via the seam
+        assert len(buffers.vertex_data) > 0  # carries its gathered vertices
+        assert len(buffers.index_data) > 0  # and its remapped triangles
 
     assert by_part.keys() == reference.keys()  # Unassigned + wood
     anchored = vm.chunkOffset(by_part[0])  # the Unassigned remainder

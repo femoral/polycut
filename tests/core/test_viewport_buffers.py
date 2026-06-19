@@ -343,7 +343,7 @@ def test_part_chunks_partition_every_face_exactly_once():
 
     chunks = build_part_chunks(mesh, partition)
 
-    assert sum(c.triangle_count for c in chunks) == 3  # exhaustive over the 3 faces
+    assert sum(c.buffers.triangle_count for c in chunks) == 3  # exhaustive over the 3 faces
     assert len(chunks) == 3  # Unassigned + A + B; none empty here
 
 
@@ -357,7 +357,9 @@ def test_part_chunks_reuse_the_fused_vertex_normals():
 
     chunk = {c.part_id: c for c in build_part_chunks(mesh, partition)}[a]
 
-    floats = np.frombuffer(chunk.vertex_data, np.float32).reshape(chunk.vertex_count, -1)
+    floats = np.frombuffer(chunk.buffers.vertex_data, np.float32).reshape(
+        chunk.buffers.vertex_count, -1
+    )
     np.testing.assert_allclose(floats[:, 3:6], [[0.0, 1.0, 0.0]] * 3, atol=1e-6)  # Part A's normal
 
 
@@ -369,7 +371,7 @@ def test_part_chunk_declares_its_attribute_layout():
 
     chunk = {c.part_id: c for c in build_part_chunks(mesh, partition)}[a]
 
-    assert chunk.layout == (
+    assert chunk.buffers.layout == (
         VertexAttr(Attr.POSITION, 0, 3),
         VertexAttr(Attr.NORMAL, 12, 3),
         VertexAttr(Attr.TEXCOORD, 24, 2),

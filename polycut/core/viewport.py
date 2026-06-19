@@ -249,28 +249,21 @@ def build_highlight_buffers(mesh, face_ids) -> HighlightBuffers:
 
 @dataclass(frozen=True)
 class PartChunk:
-    """One Part's geometry, ready to draw as its own translated node for Explode (#31).
+    """One Part's explode placement wrapping its upload buffer (#31).
 
-    ``offset`` is the radial spread direction (part centroid − model centroid),
-    scaled by the live ``amount`` in the viewport; Unassigned's is the zero vector so
-    the remainder stays anchored. The vertex buffer is gathered from the fused mesh's
-    own positions/normals/UVs (no ``trimesh.submesh`` recompute), with the triangle +
-    edge indices remapped into the chunk's own compacted vertex range.
+    The explode metadata the viewport's node placement reads — ``part_id``, the swatch
+    ``colour``, and the radial ``offset`` (part centroid − model centroid, scaled by the
+    live ``amount``; Unassigned's is the zero vector so the remainder stays anchored) —
+    wraps a pure ``buffers`` the shared geometry adapter draws. That buffer reuses the
+    fused mesh's interleaved positions/normals/UVs (no ``trimesh.submesh`` recompute),
+    with triangle + edge indices remapped into the chunk's own compacted vertex range —
+    the same shape as a mesh buffer, so a chunk shades exactly like the assembled mesh.
     """
 
     part_id: int
     colour: tuple[int, int, int]
     offset: tuple[float, float, float]
-    vertex_count: int
-    triangle_count: int
-    line_count: int
-    vertex_data: bytes
-    index_data: bytes
-    line_index_data: bytes
-    stride: int
-    bounds_min: tuple[float, float, float]
-    bounds_max: tuple[float, float, float]
-    layout: tuple[VertexAttr, ...] = _MESH_LAYOUT  # same interleave as the mesh buffer
+    buffers: MeshBuffers  # the pure upload buffer the geometry adapter consumes
 
 
 def build_part_chunks(mesh, partition) -> list[PartChunk]:
@@ -320,15 +313,17 @@ def build_part_chunks(mesh, partition) -> list[PartChunk]:
                 part_id=part.id,
                 colour=tuple(part.colour),
                 offset=offset,
-                vertex_count=len(used),
-                triangle_count=int(part_faces.shape[0]),
-                line_count=int(chunk_edges.shape[0]),
-                vertex_data=chunk_vertices.tobytes(),
-                index_data=chunk_tris.tobytes(),
-                line_index_data=np.ascontiguousarray(chunk_edges).tobytes(),
-                stride=stride,
-                bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
-                bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+                buffers=MeshBuffers(
+                    vertex_count=len(used),
+                    triangle_count=int(part_faces.shape[0]),
+                    vertex_data=chunk_vertices.tobytes(),
+                    index_data=chunk_tris.tobytes(),
+                    line_index_data=np.ascontiguousarray(chunk_edges).tobytes(),
+                    line_count=int(chunk_edges.shape[0]),
+                    stride=stride,
+                    bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
+                    bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+                ),
             )
         )
     return chunks
