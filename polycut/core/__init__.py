@@ -22,8 +22,7 @@ from polycut.core.transform import Transform
 from polycut.core.simplify import ModelSimplifier, PreserveOptions, simplify_model
 from polycut.core.viewport import (
     Attr,
-    MeshBuffers,
-    PartBuffers,
+    Buffers,
     VertexAttr,
     build_mesh_buffers,
     build_part_buffers,
@@ -32,10 +31,9 @@ from polycut.core.viewport import (
 
 __all__ = [
     "Attr",
+    "Buffers",
     "ExportResult",
-    "MeshBuffers",
     "ModelSimplifier",
-    "PartBuffers",
     "Part",
     "Partition",
     "PreserveOptions",

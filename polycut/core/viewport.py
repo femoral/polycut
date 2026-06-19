@@ -64,26 +64,31 @@ _HIGHLIGHT_LAYOUT = _layout((Attr.POSITION, 3))
 
 
 @dataclass(frozen=True)
-class MeshBuffers:
-    """GPU-ready buffers for one mesh.
+class Buffers:
+    """GPU-ready interleaved vertex + index buffers for one drawable surface.
 
-    ``vertex_data`` is the interleaved per-vertex attribute buffer (float32);
-    ``stride`` is its bytes-per-vertex. The renderer uploads these verbatim.
+    The one self-describing buffer value every viewport surface produces — the
+    before/after mesh, the flat-colour Parts view, the active-Part silhouette, and the
+    explode chunks. ``vertex_data`` is the interleaved per-vertex attribute buffer
+    (float32) and ``stride`` its bytes-per-vertex; ``layout`` describes which attributes
+    sit at which offset (built beside the interleave). The renderer uploads these
+    verbatim by looping the layout. ``line_index_data`` holds the unique triangle edges
+    for the Wireframe / Edges line pass — empty for a surface with no line pass.
     """
 
     vertex_count: int
     triangle_count: int
     vertex_data: bytes
     index_data: bytes
-    line_index_data: bytes  # unique triangle edges, for the Wireframe / Edges modes
-    line_count: int
     stride: int
     bounds_min: tuple[float, float, float]
     bounds_max: tuple[float, float, float]
-    layout: tuple[VertexAttr, ...] = _MESH_LAYOUT  # self-describing attribute offsets
+    layout: tuple[VertexAttr, ...]
+    line_index_data: bytes = b""  # unique triangle edges (Wireframe / Edges); empty when none
+    line_count: int = 0
 
 
-def build_mesh_buffers(model) -> MeshBuffers:
+def build_mesh_buffers(model) -> Buffers:
     """Build the render buffers for ``model``'s current geometry.
 
     A multi-object model loads as a ``trimesh.Scene``; the viewport draws the
@@ -109,7 +114,7 @@ def build_mesh_buffers(model) -> MeshBuffers:
     lo = positions.min(axis=0)
     hi = positions.max(axis=0)
 
-    return MeshBuffers(
+    return Buffers(
         vertex_count=len(geometry.vertices),
         triangle_count=int(geometry.faces.shape[0]),
         vertex_data=vertex_data,
@@ -119,33 +124,11 @@ def build_mesh_buffers(model) -> MeshBuffers:
         stride=interleaved.shape[1] * 4,
         bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
         bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+        layout=_MESH_LAYOUT,
     )
 
 
-@dataclass(frozen=True)
-class PartBuffers:
-    """GPU buffers for the flat-colour Parts view.
-
-    ``vertex_data`` interleaves position (3 floats) + Part RGBA (4 floats) per
-    vertex — no normals/UVs, since the view is flat and unlit. Shares the mesh's
-    triangle indices.
-    """
-
-    vertex_count: int
-    triangle_count: int
-    vertex_data: bytes
-    index_data: bytes
-    stride: int
-    bounds_min: tuple[float, float, float]
-    bounds_max: tuple[float, float, float]
-    layout: tuple[VertexAttr, ...] = _PARTS_LAYOUT  # self-describing attribute offsets
-    # The flat-colour view has no line pass, but every buffer carries a line field so
-    # all four are structurally uniform behind the one geometry adapter (empty here).
-    line_index_data: bytes = b""
-    line_count: int = 0
-
-
-def build_part_buffers(mesh, partition, active_id: int = UNASSIGNED_ID) -> PartBuffers:
+def build_part_buffers(mesh, partition, active_id: int = UNASSIGNED_ID) -> Buffers:
     """Build the flat-colour Parts buffers for ``mesh`` under ``partition``.
 
     Positions come straight from the (simplified) mesh — the exact geometry the
@@ -160,7 +143,7 @@ def build_part_buffers(mesh, partition, active_id: int = UNASSIGNED_ID) -> PartB
     indices = np.ascontiguousarray(np.asarray(mesh.faces, dtype=np.uint32))
     lo = positions.min(axis=0)
     hi = positions.max(axis=0)
-    return PartBuffers(
+    return Buffers(
         vertex_count=len(positions),
         triangle_count=int(faces.shape[0]),
         vertex_data=interleaved.tobytes(),
@@ -168,6 +151,7 @@ def build_part_buffers(mesh, partition, active_id: int = UNASSIGNED_ID) -> PartB
         stride=interleaved.shape[1] * 4,
         bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
         bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+        layout=_PARTS_LAYOUT,
     )
 
 
@@ -198,45 +182,20 @@ def build_part_colours(
     return colours
 
 
-@dataclass(frozen=True)
-class HighlightBuffers:
-    """GPU buffers for the active-Part highlight silhouette (#30).
+def build_highlight_buffers(mesh, face_ids) -> Buffers:
+    """Build the active-Part silhouette buffers for ``face_ids`` over ``mesh`` (#30).
 
-    ``vertex_data`` is position only (3 floats) — the fused mesh's own vertices;
-    ``index_data`` holds the active Part's **triangles** (its faces, indexing those
-    vertices). An offscreen pass renders these faces flat into a mask, and a
-    screen-space edge-detect draws a teal contour around the projected silhouette —
-    topology-independent, so it reads as an outline even on the half-disconnected
-    Meshy cut where an edge-based outline would just be a wireframe.
-    """
-
-    vertex_count: int
-    triangle_count: int
-    vertex_data: bytes
-    index_data: bytes
-    stride: int
-    bounds_min: tuple[float, float, float]
-    bounds_max: tuple[float, float, float]
-    layout: tuple[VertexAttr, ...] = _HIGHLIGHT_LAYOUT  # self-describing attribute offsets
-    # No line pass (it draws filled faces into a mask), but carries a line field so all
-    # four buffers are structurally uniform behind the one geometry adapter (empty here).
-    line_index_data: bytes = b""
-    line_count: int = 0
-
-
-def build_highlight_buffers(mesh, face_ids) -> HighlightBuffers:
-    """Build the silhouette buffers for ``face_ids`` over ``mesh``.
-
-    Positions are the fused mesh's own vertices (full, shared); the index buffer is
-    just the active Part's faces, so the offscreen pass draws exactly that Part's
-    surface. Only a face-index slice — no edge enumeration — so it stays cheap to
-    rebuild on every selection. Rebuilt whenever the active Part or its faces change.
+    ``vertex_data`` is position only (the fused mesh's own vertices); ``index_data``
+    holds just the active Part's faces, so an offscreen pass draws exactly that Part's
+    surface into a mask whose screen-space edge becomes a teal contour —
+    topology-independent, so it reads even on the half-disconnected Meshy cut. Only a
+    face-index slice (no edge enumeration), so it stays cheap to rebuild on selection.
     """
     positions = np.asarray(mesh.vertices, dtype=np.float32)
     tris = np.asarray(mesh.faces, dtype=np.uint32)[np.asarray(face_ids, dtype=np.int64)]
     lo = positions.min(axis=0)
     hi = positions.max(axis=0)
-    return HighlightBuffers(
+    return Buffers(
         vertex_count=len(positions),
         triangle_count=int(tris.shape[0]),
         vertex_data=np.ascontiguousarray(positions).tobytes(),
@@ -244,6 +203,7 @@ def build_highlight_buffers(mesh, face_ids) -> HighlightBuffers:
         stride=positions.shape[1] * 4,
         bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
         bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+        layout=_HIGHLIGHT_LAYOUT,
     )
 
 
@@ -263,7 +223,7 @@ class PartChunk:
     part_id: int
     colour: tuple[int, int, int]
     offset: tuple[float, float, float]
-    buffers: MeshBuffers  # the pure upload buffer the geometry adapter consumes
+    buffers: Buffers  # the pure upload buffer the geometry adapter consumes
 
 
 def build_part_chunks(mesh, partition) -> list[PartChunk]:
@@ -313,7 +273,7 @@ def build_part_chunks(mesh, partition) -> list[PartChunk]:
                 part_id=part.id,
                 colour=tuple(part.colour),
                 offset=offset,
-                buffers=MeshBuffers(
+                buffers=Buffers(
                     vertex_count=len(used),
                     triangle_count=int(part_faces.shape[0]),
                     vertex_data=chunk_vertices.tobytes(),
@@ -323,6 +283,7 @@ def build_part_chunks(mesh, partition) -> list[PartChunk]:
                     stride=stride,
                     bounds_min=(float(lo[0]), float(lo[1]), float(lo[2])),
                     bounds_max=(float(hi[0]), float(hi[1]), float(hi[2])),
+                    layout=_MESH_LAYOUT,
                 ),
             )
         )
