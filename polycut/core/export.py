@@ -28,6 +28,7 @@ import trimesh
 from collada import Collada, geometry, material, scene, source
 
 from polycut.core.parts import Partition
+from polycut.core.transform import Transform
 
 SHARED_IMAGE_ID = "texture-image"  # one <library_images> entry, shared by all Parts
 
@@ -40,6 +41,32 @@ class ExportResult:
     output_size_bytes: int
     face_count: int
     texture_count: int
+
+
+def export_model(
+    model,
+    output_path,
+    transform: Transform,
+    partition: Partition | None = None,
+) -> ExportResult:
+    """Run the whole transform→parts→export pipeline and write the ``.dae``.
+
+    Bakes ``transform`` into the geometry (scale + up-axis), degrades a partition
+    whose label count no longer matches the transformed mesh to a single group (a
+    stale carve from a prior cut), and writes the Collada file declaring the
+    Transform's target unit. The single headless entry point a Qt worker — or a
+    future CLI — drives; the Collada writer below stays the low-level writer.
+    """
+    model = transform.apply(model)
+    if partition is not None and len(partition.labels) != model.face_count:
+        partition = None  # stale carve (face set changed) — fall back to one group
+    return export_collada(
+        model,
+        output_path,
+        partition=partition,
+        unit_name=transform.unit_name,
+        unit_meters=transform.unit_meters,
+    )
 
 
 def export_collada(
