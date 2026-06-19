@@ -9,6 +9,7 @@ translation stays unit-testable. No Qt import lives here.
 
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass
 
 import numpy as np
@@ -18,6 +19,48 @@ from polycut.core.parts import UNASSIGNED_COLOUR, UNASSIGNED_ID
 
 # How far the active Part's colour is pushed toward white as the selection highlight.
 _HIGHLIGHT = 0.4
+
+
+class Attr(enum.Enum):
+    """A vertex attribute kind, in a neutral (Qt-free) vocabulary.
+
+    The buffer describes its own layout in these terms so core stays Qt-free; the
+    bridge holds the one small map from these kinds to Qt3D's attribute semantics.
+    """
+
+    POSITION = "position"
+    NORMAL = "normal"
+    TEXCOORD = "texcoord"
+    COLOR = "color"
+
+
+@dataclass(frozen=True)
+class VertexAttr:
+    """One attribute in an interleaved vertex: its kind, byte offset, and how many
+    float32 components it spans."""
+
+    kind: Attr
+    offset: int  # byte offset into the interleaved vertex
+    components: int  # number of float32 components
+
+
+def _layout(*specs: tuple[Attr, int]) -> tuple[VertexAttr, ...]:
+    """Build a contiguous float32 attribute layout from ordered ``(kind, components)``
+    pairs. Offsets accumulate left-to-right, so a layout built from the same order as
+    an ``np.hstack`` cannot drift from the interleave it describes — the offsets are
+    derived from the same component sizes, never written out by hand."""
+    attrs, offset = [], 0
+    for kind, components in specs:
+        attrs.append(VertexAttr(kind, offset, components))
+        offset += components * 4  # float32 == 4 bytes
+    return tuple(attrs)
+
+
+# The interleave each builder produces, as a self-describing layout (built right
+# beside the matching np.hstack below, so the offsets can never lie).
+_MESH_LAYOUT = _layout((Attr.POSITION, 3), (Attr.NORMAL, 3), (Attr.TEXCOORD, 2))
+_PARTS_LAYOUT = _layout((Attr.POSITION, 3), (Attr.COLOR, 4))
+_HIGHLIGHT_LAYOUT = _layout((Attr.POSITION, 3))
 
 
 @dataclass(frozen=True)
@@ -37,6 +80,7 @@ class MeshBuffers:
     stride: int
     bounds_min: tuple[float, float, float]
     bounds_max: tuple[float, float, float]
+    layout: tuple[VertexAttr, ...] = _MESH_LAYOUT  # self-describing attribute offsets
 
 
 def build_mesh_buffers(model) -> MeshBuffers:
@@ -94,6 +138,11 @@ class PartBuffers:
     stride: int
     bounds_min: tuple[float, float, float]
     bounds_max: tuple[float, float, float]
+    layout: tuple[VertexAttr, ...] = _PARTS_LAYOUT  # self-describing attribute offsets
+    # The flat-colour view has no line pass, but every buffer carries a line field so
+    # all four are structurally uniform behind the one geometry adapter (empty here).
+    line_index_data: bytes = b""
+    line_count: int = 0
 
 
 def build_part_buffers(mesh, partition, active_id: int = UNASSIGNED_ID) -> PartBuffers:
@@ -168,6 +217,11 @@ class HighlightBuffers:
     stride: int
     bounds_min: tuple[float, float, float]
     bounds_max: tuple[float, float, float]
+    layout: tuple[VertexAttr, ...] = _HIGHLIGHT_LAYOUT  # self-describing attribute offsets
+    # No line pass (it draws filled faces into a mask), but carries a line field so all
+    # four buffers are structurally uniform behind the one geometry adapter (empty here).
+    line_index_data: bytes = b""
+    line_count: int = 0
 
 
 def build_highlight_buffers(mesh, face_ids) -> HighlightBuffers:
@@ -216,6 +270,7 @@ class PartChunk:
     stride: int
     bounds_min: tuple[float, float, float]
     bounds_max: tuple[float, float, float]
+    layout: tuple[VertexAttr, ...] = _MESH_LAYOUT  # same interleave as the mesh buffer
 
 
 def build_part_chunks(mesh, partition) -> list[PartChunk]:

@@ -18,7 +18,13 @@ import trimesh
 from polycut.core import build_mesh_buffers, load_source_model
 from polycut.core.model import SourceModel
 from polycut.core.parts import UNASSIGNED_ID, Partition
-from polycut.core.viewport import build_highlight_buffers, build_part_chunks
+from polycut.core.viewport import (
+    Attr,
+    VertexAttr,
+    build_highlight_buffers,
+    build_part_buffers,
+    build_part_chunks,
+)
 
 MULTI_OBJECT = (
     Path(__file__).resolve().parents[1] / "fixtures" / "multi_object" / "two_cubes.obj"
@@ -230,6 +236,21 @@ def test_vertex_buffer_carries_uvs(textured_model):
     )
 
 
+def test_mesh_buffer_declares_its_attribute_layout(textured_model):
+    """The mesh buffer carries its own attribute layout — kind + byte offset +
+    component count — built beside the interleave that sets those offsets, so the
+    offsets are a first-class, assertable value rather than a constant the GPU
+    adapter has to mirror by hand. Position 0, normal 12, uv 24 (the pos3/norm3/uv2
+    interleave)."""
+    buffers = build_mesh_buffers(textured_model)
+
+    assert buffers.layout == (
+        VertexAttr(Attr.POSITION, 0, 3),
+        VertexAttr(Attr.NORMAL, 12, 3),
+        VertexAttr(Attr.TEXCOORD, 24, 2),
+    )
+
+
 def test_untextured_model_still_builds_a_valid_buffer(untextured_model):
     """No UVs is not an error — the layout stays stable, UVs default to zero."""
     buffers = build_mesh_buffers(untextured_model)
@@ -238,6 +259,20 @@ def test_untextured_model_still_builds_a_valid_buffer(untextured_model):
     assert buffers.vertex_count == 4
     assert floats.shape[1] == 8  # pos3 + norm3 + uv2 — stable with or without UVs
     np.testing.assert_array_equal(floats[:, 6:8], 0.0)
+
+
+def test_parts_buffer_declares_its_attribute_layout():
+    """The flat-colour Parts buffer declares position + RGBA — position 0, colour 12
+    (no normals/UVs, since the view is flat and unlit)."""
+    mesh = _three_strip()
+    partition, _, _ = _abc_partition()
+
+    buffers = build_part_buffers(mesh, partition)
+
+    assert buffers.layout == (
+        VertexAttr(Attr.POSITION, 0, 3),
+        VertexAttr(Attr.COLOR, 12, 4),
+    )
 
 
 def test_highlight_buffers_are_the_part_silhouette_faces(textured_model):
@@ -255,6 +290,7 @@ def test_highlight_buffers_are_the_part_silhouette_faces(textured_model):
     tris = np.frombuffer(buffers.index_data, np.uint32).reshape(-1, 3)
     assert buffers.triangle_count == 1
     np.testing.assert_array_equal(tris, [mesh.faces[0]])  # the active Part's one face
+    assert buffers.layout == (VertexAttr(Attr.POSITION, 0, 3),)  # position only
 
 
 def _three_strip(normals=None):
@@ -323,6 +359,36 @@ def test_part_chunks_reuse_the_fused_vertex_normals():
 
     floats = np.frombuffer(chunk.vertex_data, np.float32).reshape(chunk.vertex_count, -1)
     np.testing.assert_allclose(floats[:, 3:6], [[0.0, 1.0, 0.0]] * 3, atol=1e-6)  # Part A's normal
+
+
+def test_part_chunk_declares_its_attribute_layout():
+    """Each explode chunk reuses the fused mesh's interleave, so it declares the same
+    position/normal/UV layout as the mesh buffer — it shades and textures identically."""
+    mesh = _three_strip()
+    partition, a, _ = _abc_partition()
+
+    chunk = {c.part_id: c for c in build_part_chunks(mesh, partition)}[a]
+
+    assert chunk.layout == (
+        VertexAttr(Attr.POSITION, 0, 3),
+        VertexAttr(Attr.NORMAL, 12, 3),
+        VertexAttr(Attr.TEXCOORD, 24, 2),
+    )
+
+
+def test_edgeless_buffers_carry_empty_line_data():
+    """The flat-colour Parts buffer and the highlight silhouette have no line pass, but
+    both still expose an (empty) line-index field, so all four buffer kinds are
+    structurally uniform behind the single geometry adapter."""
+    mesh = _three_strip()
+    partition, _, _ = _abc_partition()
+
+    parts = build_part_buffers(mesh, partition)
+    highlight = build_highlight_buffers(mesh, [0])
+
+    for buffers in (parts, highlight):
+        assert buffers.line_count == 0
+        assert buffers.line_index_data == b""
 
 
 def test_buffers_expose_bounds_for_framing(textured_model):

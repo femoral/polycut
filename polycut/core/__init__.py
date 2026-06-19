@@ -21,14 +21,17 @@ from polycut.core.segment import face_colours, segment, split_by_colour
 from polycut.core.transform import Transform
 from polycut.core.simplify import ModelSimplifier, PreserveOptions, simplify_model
 from polycut.core.viewport import (
+    Attr,
     MeshBuffers,
     PartBuffers,
+    VertexAttr,
     build_mesh_buffers,
     build_part_buffers,
     build_part_colours,
 )
 
 __all__ = [
+    "Attr",
     "ExportResult",
     "MeshBuffers",
     "ModelSimplifier",
@@ -41,6 +44,7 @@ __all__ = [
     "SpatialBrush",
     "Transform",
     "UNASSIGNED_ID",
+    "VertexAttr",
     "UP_AXES",
     "add_to_part",
     "build_mesh_buffers",
