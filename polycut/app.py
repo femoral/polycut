@@ -15,6 +15,7 @@ from polycut.bridge import mesh_geometry  # noqa: F401 — registers the QML Mes
 from polycut.bridge import parts_geometry  # noqa: F401 — registers the QML PartsGeometry type
 from polycut.bridge import highlight_geometry  # noqa: F401 — registers the QML HighlightGeometry type
 from polycut.bridge import explode_geometry  # noqa: F401 — registers the QML ExplodeChunkGeometry type
+from polycut.bridge import buffer_geometry  # noqa: F401 — registers the QML BufferGeometry type
 from polycut.resources import base_dir, ui_dir
 
 UI_DIR = ui_dir()
