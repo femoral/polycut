@@ -234,6 +234,16 @@ class Processor(QObject):
 
     fileName = Property(str, _get_file_name, notify=statsChanged)
 
+    def _get_source_format(self) -> str:
+        """The format the current model was loaded from, as an upper-case tag for
+        the header badge (e.g. ``GLB``) — the source file's extension, since trimesh
+        infers the format from it. Empty when no model is loaded."""
+        if not self._model:
+            return ""
+        return self._model.source_path.suffix.lstrip(".").upper()
+
+    sourceFormat = Property(str, _get_source_format, notify=statsChanged)
+
     def _get_face_count(self) -> int:
         """The current (post-simplify) face count — the hero readout."""
         current = self._current()
@@ -333,6 +343,22 @@ class Processor(QObject):
         ]
 
     exportNameFilters = Property("QVariantList", _get_export_name_filters, constant=True)
+
+    def _get_import_name_filters(self) -> list:
+        """The Open-dialog file-type filters: every format ``load_source_model``
+        accepts (MVP-4 slice B / ADR-0007) — the glTF pair, Collada, OBJ, and the
+        geometry-only PLY/STL/OFF. A leading catch-all lists every pattern at once
+        so the designer sees any importable model without first picking its format.
+        trimesh infers the actual format from the file, so the order is cosmetic."""
+        return [
+            "3D models (*.glb *.gltf *.dae *.obj *.ply *.stl *.off)",
+            "glTF (*.glb *.gltf)",
+            "Collada (*.dae)",
+            "Wavefront OBJ (*.obj)",
+            "Geometry (*.ply *.stl *.off)",
+        ]
+
+    importNameFilters = Property("QVariantList", _get_import_name_filters, constant=True)
 
     # ---- load ----------------------------------------------------------
     @Slot(str)

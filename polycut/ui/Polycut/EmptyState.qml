@@ -50,7 +50,7 @@ Item {
 
             Text {
                 Layout.alignment: Qt.AlignHCenter
-                text: "bring the .mtl and textures along too"
+                text: "bring textures along too"
                 color: Theme.fg2
                 font.family: Theme.fontUi
                 font.pixelSize: Theme.fontSmall
@@ -60,7 +60,7 @@ Item {
                 Layout.alignment: Qt.AlignHCenter
                 spacing: Theme.gap
                 Repeater {
-                    model: ["OBJ"]
+                    model: ["GLB", "GLTF", "DAE", "OBJ", "PLY", "STL", "OFF"]
                     delegate: Rectangle {
                         required property string modelData
                         radius: Theme.rSm

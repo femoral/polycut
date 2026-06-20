@@ -41,7 +41,7 @@ ApplicationWindow {
     FileDialog {
         id: openDialog
         title: "Open a Meshy model"
-        nameFilters: ["Wavefront OBJ (*.obj)"]
+        nameFilters: processor.importNameFilters
         onAccepted: processor.loadFile(selectedFile)
     }
     FileDialog {
@@ -108,7 +108,7 @@ ApplicationWindow {
                     Text {
                         id: fmtTag
                         anchors.centerIn: parent
-                        text: "OBJ"
+                        text: processor.sourceFormat
                         color: Theme.teal
                         font.family: Theme.fontMono
                         font.pixelSize: Theme.fontMicro
