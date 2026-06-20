@@ -27,6 +27,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 from collada import Collada, geometry, material, scene, source
+from PIL import Image
 
 from polycut.core.parts import Partition
 from polycut.core.transform import Transform
@@ -177,17 +178,92 @@ def _write_collada(
 
 
 def _part_image(part, images):
-    """The image a Part samples: its own ``texture`` index, or — when it has none and
-    the model carries a single image — that shared image (single-texture parity).
-    A Part with no texture in a multi-texture model exports as an untextured slot."""
-    if not images:
-        return None
+    """The image a Part samples, or ``None`` (untextured slot)."""
+    index = _resolve_texture_index(part, len(images))
+    return images[index] if index is not None else None
+
+
+def _resolve_texture_index(part, n_textures: int) -> int | None:
+    """Which texture a Part samples: its own ``texture`` index, or — when it has none
+    and the model carries a single image — that shared image (single-texture parity).
+    ``None`` when the Part has no resolvable texture (an untextured slot)."""
     index = part.texture
     if index is None:
-        index = 0 if len(images) == 1 else None
-    if index is None or index >= len(images):
+        index = 0 if n_textures == 1 else None
+    if index is None or index >= n_textures:
         return None
-    return images[index]
+    return index
+
+
+def export_gltf(
+    model,
+    output_path,
+    partition: Partition | None = None,
+    unit_name: str = "meter",
+    unit_meters: float = 1.0,
+) -> ExportResult:
+    """Write ``model`` to a glTF/GLB (``.glb`` or ``.gltf`` by extension) and report
+    what was produced.
+
+    Each non-empty Part becomes one named submesh in a :class:`trimesh.Scene`, with
+    its own material referencing its own **embedded** texture (ADR-0007), so a
+    ``.glb`` is a single self-contained file of N named, material-slotted pieces. The
+    geometry is already baked to scale by the caller; glTF is metric, so
+    ``unit_name``/``unit_meters`` are accepted for a uniform writer signature but not
+    re-applied. A single-Part model degrades to one mesh + one material.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    mesh = _single_mesh(model.geometry)
+    if partition is None:  # no Parts → one group over the whole mesh
+        partition = Partition.fresh(int(mesh.faces.shape[0]))
+
+    images = [Image.open(t) for t in model.textures]
+    normals = np.asarray(mesh.vertex_normals, dtype=np.float64)
+    uv = getattr(mesh.visual, "uv", None)
+    if uv is not None:
+        uv = np.asarray(uv, dtype=np.float64)
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    labels = partition.labels
+
+    out_scene = trimesh.Scene()
+    used_textures: set[int] = set()
+    for part in partition.parts:
+        face_idx = np.where(labels == part.id)[0]
+        if face_idx.size == 0:  # only non-empty Parts become submeshes
+            continue
+        index = _resolve_texture_index(part, len(images))
+        if index is not None:
+            used_textures.add(index)
+        submesh = _build_submesh(
+            mesh.faces[face_idx], vertices, normals, uv, images[index] if index is not None else None
+        )
+        out_scene.add_geometry(submesh, geom_name=part.name)
+
+    out_scene.export(output_path)
+    return ExportResult(
+        output_path=output_path,
+        output_size_bytes=output_path.stat().st_size,
+        face_count=int(mesh.faces.shape[0]),
+        texture_count=len(used_textures),
+    )
+
+
+def _build_submesh(part_faces, vertices, normals, uv, image) -> trimesh.Trimesh:
+    """One Part's faces as a standalone mesh — only the vertices its faces touch,
+    remapped to a local 0-based index, carrying its own UVs + texture (or untextured)."""
+    used, inverse = np.unique(part_faces, return_inverse=True)
+    local_faces = inverse.reshape(-1, 3)
+    submesh = trimesh.Trimesh(
+        vertices=vertices[used],
+        faces=local_faces,
+        vertex_normals=normals[used],
+        process=False,
+    )
+    if image is not None and uv is not None:
+        submesh.visual = trimesh.visual.TextureVisuals(uv=uv[used], image=image)
+    return submesh
 
 
 def _build_part(doc, part, part_faces, vertices, normals, uv, image) -> scene.Node:
