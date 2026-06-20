@@ -1,12 +1,21 @@
 name: Windows build
 
 # PyInstaller cannot cross-compile, so the Windows build runs on a Windows
-# runner (issue #5). It's a one-directory bundle (issue #17) for fast startup;
-# the folder is attached to each run (zipped) for download and manual
-# verification on a clean Windows 10/11 machine.
+# runner (issue #5). It's a one-directory bundle (issue #17) for fast startup.
+# Manual-only: run it from the Actions tab when a build is wanted. It zips the
+# bundle, attaches it to the run for quick download, and publishes it as an asset
+# on a GitHub Release tagged for the current version.
 
 on:
   workflow_dispatch:  # manual-only — run from the Actions tab when a build is wanted
+    inputs:
+      tag:
+        description: "Release tag (default: v<version> from polycut.__version__)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write  # create the GitHub Release and upload the zip as an asset
 
 jobs:
   build:
@@ -27,11 +36,42 @@ jobs:
       - name: Build one-directory bundle
         run: pyinstaller --noconfirm --clean polycut.spec
 
-      - name: Upload artifact
+      - name: Resolve version and tag
+        id: ver
+        shell: bash
+        run: |
+          version=$(python -c "import polycut; print(polycut.__version__)")
+          tag="${{ inputs.tag }}"
+          [ -z "$tag" ] && tag="v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Zip the bundle
+        shell: pwsh
+        # Archive the whole Polycut/ folder so unzipping yields one tidy folder
+        # with Polycut.exe inside it.
+        run: Compress-Archive -Path dist/Polycut -DestinationPath "Polycut-windows-${{ steps.ver.outputs.version }}.zip"
+
+      - name: Attach zip to the run
         uses: actions/upload-artifact@v4
         with:
-          # upload-artifact zips the whole folder; the user unzips and runs the
-          # Polycut.exe inside it.
           name: Polycut-windows
-          path: dist/Polycut
+          path: Polycut-windows-${{ steps.ver.outputs.version }}.zip
           if-no-files-found: error
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          asset="Polycut-windows-${{ steps.ver.outputs.version }}.zip"
+          tag="${{ steps.ver.outputs.tag }}"
+          # Create the release on first run for this tag; on a re-run, just
+          # replace the asset so the tag's download always matches this build.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$asset" --clobber
+          else
+            gh release create "$tag" "$asset" \
+              --title "Polycut ${{ steps.ver.outputs.version }} (Windows)" \
+              --notes "Manual Windows build. Download the zip, unzip it, and run Polycut.exe inside the unzipped folder — no Python install needed."
+          fi

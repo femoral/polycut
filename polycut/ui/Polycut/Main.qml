@@ -46,7 +46,7 @@ ApplicationWindow {
     }
     FileDialog {
         id: saveDialog
-        title: "Export to SketchUp"
+        title: "Export to DAE"
         fileMode: FileDialog.SaveFile
         defaultSuffix: "dae"
         nameFilters: ["Collada (*.dae)"]
@@ -442,7 +442,7 @@ ApplicationWindow {
                     onClicked: openDialog.open()
                 }
                 PillButton {
-                    text: "Export to SketchUp"
+                    text: "Export to DAE"
                     primary: true
                     enabled: processor.hasModel && !processor.busy
                     onClicked: {

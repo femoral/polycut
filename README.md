@@ -1,5 +1,7 @@
 # Polycut
 
+![Polycut](docs/screenshot.png)
+
 Polycut is a desktop tool that turns a high-poly Meshy Source model into a
 SketchUp-ready file. It simplifies the model to a workable polygon count, carves
 it into per-piece material slots, sizes and orients it correctly, and exports it
@@ -32,14 +34,14 @@ export, and the target unit is also declared in the Collada `<unit>` metadata.
 Parts are the heart of the tool. A Meshy export arrives as a single fused mesh
 under one baked material, so there is nothing to select piece by piece. Polycut
 carves it into named, non-overlapping Parts, each of which exports as its own
-SketchUp group with its own swappable material slot — so the designer reassigns
-materials per piece in SketchUp instead of painting hundreds of faces. Three
-tools do the carving: an automatic colour cluster that groups faces by texture
-colour with k-means in CIELAB, a colour wand that grows a selection by colour
-either locally or across gaps in the geometry, and a spatial brush that paints
-faces by proximity. A built-in Unassigned Part always holds whatever has not been
-carved yet, so the export covers the whole model with no orphaned triangles. You
-can rename, hide, merge, add, and delete Parts from the outliner.
+group with its own swappable material slot — so the designer reassigns materials
+per piece in SketchUp instead of painting hundreds of faces. Three tools do the
+carving: an automatic colour cluster that groups faces by texture colour with
+k-means in CIELAB, a colour wand that grows a selection by colour either locally
+or across gaps in the geometry, and a spatial brush that paints faces by
+proximity. A built-in Unassigned Part always holds whatever has not been carved
+yet, so the export covers the whole model with no orphaned triangles. You can
+rename, hide, merge, add, and delete Parts from the outliner.
 
 Export writes a single textured `.dae` with one named node per Part, each
 carrying its own material slot, all sharing the one baked texture, which is copied
@@ -56,22 +58,36 @@ between them, with the wheel setting how far they spread. A processing chip
 reports whenever a load, simplify, export, or cluster is running, and you can open
 another model without restarting the app.
 
-## Architecture
+## Install
 
-The code is split across three layers. The `polycut/core/` package is the
-headless pipeline — loading, simplifying, transforming (scale and orient),
-segmenting into Parts (cluster, wand, brush, and picking), building the viewport
-buffers, and writing the multi-Part Collada export. It has no Qt dependency and is
-the seam the tests exercise. The `polycut/bridge/` package holds the `processor`
-QObject that exposes `core` to QML, along with the Parts view-model and the
-buffer-source seam that feeds geometry to the viewport. The `polycut/ui/Polycut/`
-package is the QML shell, the `Theme` singleton that is the single source of truth
-for the design system, and the bundled Inter and JetBrains Mono fonts.
+On **Windows** you don't need Python. Download the latest build from the
+[Releases](https://github.com/femoral/polycut/releases) page, unzip it, and run
+`Polycut.exe` inside the unzipped folder. The bundle is self-contained — the Qt
+and PyMeshLab native libraries ship beside the executable, so it runs on a clean
+machine with nothing else installed.
+
+There is no prebuilt download for **Linux or macOS** yet, so on those platforms
+you run Polycut from source. Clone the repository, create a virtual environment,
+install the project with the GUI extra, and launch the app:
+
+```sh
+git clone https://github.com/femoral/polycut.git
+cd polycut
+python -m venv .venv
+.venv/bin/python -m ensurepip
+.venv/bin/python -m pip install -e ".[gui]"
+.venv/bin/python -m polycut.app
+```
+
+Polycut needs Python 3.11 or newer. On NixOS the native libraries the PySide6 /
+Qt and PyMeshLab wheels load at runtime are not in the wheels, so enter the
+provided dev shell with `nix-shell` before creating the `.venv` (see Develop
+below for what the shell sets up).
 
 ## Develop
 
-Create a virtual environment, install the project in editable mode with the GUI
-and dev extras, then run the app or the tests:
+Install the project in editable mode with the GUI and dev extras, then run the
+app or the tests:
 
 ```sh
 python -m venv .venv
@@ -82,7 +98,7 @@ python -m venv .venv
 .venv/bin/python -m pytest           # run the tests (-m "not slow" to skip the big fixture)
 ```
 
-On NixOS, the native libraries that the PySide6 / Qt and pymeshlab wheels dlopen
+On NixOS, the native libraries that the PySide6 / Qt and PyMeshLab wheels dlopen
 at runtime are not in the wheels, so use the provided `shell.nix`. Running
 `nix-shell` enters a dev shell that supplies those libraries via
 `LD_LIBRARY_PATH` and points Qt at the hardware GL driver, so the viewport runs
@@ -96,13 +112,28 @@ under `QT_QPA_PLATFORM=offscreen`.
 PyInstaller bundles the app, including PyMeshLab's native binaries, into a
 self-contained folder that needs no Python install. It is a one-directory build —
 the libraries sit beside the `.exe` — so startup is near-instant, where a one-file
-`.exe` would re-unpack its whole payload on every launch. Cross-compiling is not
-possible, so the build runs on a Windows runner in CI
-(`.github/workflows/windows-build.yml`), which zips the folder and attaches it to
-each run as a downloadable artifact: unzip it and run the `Polycut.exe` inside. To
-build locally on Windows:
+`.exe` would re-unpack its whole payload on every launch.
+
+Cross-compiling is not possible, so the build runs on a Windows runner in CI
+(`.github/workflows/windows-build.yml`). The workflow is manual: trigger it from
+the Actions tab when a build is wanted. It zips the bundle, attaches the zip to
+the run for a quick download, and publishes it as an asset on a GitHub Release
+tagged for the current version — that Release is what the Install section above
+points people to. To build locally on Windows instead:
 
 ```sh
 pip install -e ".[gui,packaging]"
 pyinstaller --noconfirm --clean polycut.spec   # → dist/Polycut/
 ```
+
+## Architecture
+
+The code is split across three layers. The `polycut/core/` package is the
+headless pipeline — loading, simplifying, transforming (scale and orient),
+segmenting into Parts (cluster, wand, brush, and picking), building the viewport
+buffers, and writing the multi-Part Collada export. It has no Qt dependency and is
+the seam the tests exercise. The `polycut/bridge/` package holds the `processor`
+QObject that exposes `core` to QML, along with the Parts view-model and the
+buffer-source seam that feeds geometry to the viewport. The `polycut/ui/Polycut/`
+package is the QML shell, the `Theme` singleton that is the single source of truth
+for the design system, and the bundled Inter and JetBrains Mono fonts.

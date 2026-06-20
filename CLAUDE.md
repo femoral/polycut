@@ -17,6 +17,14 @@ Tests must run `offscreen` (no display); the GUI defaults to the `xcb` backend (
 
 One issue at a time, one commit per issue, pushed directly to `master` (no PRs). Before **every** commit the orchestrator runs two read-only Sonnet guard subagents on the staged changes — `privacy-guard` (no leaked PII/secrets/machine details) and `design-system-guard` (conforms to `docs/design-system.md`). Both PASS → commit + push. Either FAILS → relay findings, user decides. See `docs/agents/commit-workflow.md`.
 
+## Versioning
+
+[SemVer](https://semver.org) `MAJOR.MINOR.PATCH`. The version is declared in two places that must stay in lockstep: `version` in `pyproject.toml` and `__version__` in `polycut/__init__.py`.
+
+- **PATCH** — bumped on each commit to `master`. A commit that carries no version-worthy change (a history rewrite, a tweak to repo tooling, a no-op) may land without a bump; a bump-less commit is permissible.
+- **MINOR** — bumped when a PRD (umbrella milestone issue) is closed. Reset PATCH to `0`.
+- **MAJOR** — bumped only on explicit human request.
+
 ## Agent skills
 
 ### Issue tracker

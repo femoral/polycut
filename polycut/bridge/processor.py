@@ -672,7 +672,7 @@ class Processor(QObject):
             self.exportFailed.emit("No model loaded")
             return
         out = _to_path(output_path)
-        self._set_status("Exporting to SketchUp…")
+        self._set_status("Exporting to DAE…")
         self._set_busy(True)
         self._set_op("exporting")  # the universal chip reads "exporting…"
         threading.Thread(target=self._export_worker, args=(out,), daemon=True).start()
