@@ -154,6 +154,109 @@ def test_segment_k2_separates_the_two_colours():
     assert brown_labels[0] != grey_labels[0]  # in different clusters
 
 
+# --- Locality-aware Auto-cluster (MVP-4 slice D, ADR-0008) -----------------------
+# The cluster runs on an augmented feature [Lab colour, λ·normalized position], so
+# two regions of similar shade held apart in space split once locality is high
+# enough. Position is normalized to the model's bounding box (scale-invariant); λ=0
+# is exactly today's colour-only behaviour.
+
+
+def test_segment_accepts_a_locality_weight_and_zero_matches_colour_only():
+    """The cluster functions take a locality weight; weight 0 reproduces today's
+    colour-only labels exactly (the augmented feature collapses to colour alone)."""
+    mesh, texture, _ = _striped_mesh(n_each=20)
+
+    baseline = segment(mesh, texture, k=2)
+    with_zero = segment(mesh, texture, k=2, locality=0.0)
+
+    assert np.array_equal(with_zero, baseline)
+
+
+LIGHT = (200, 200, 200)
+DARK = (50, 50, 50)
+
+
+def _two_blocks_mesh(gap: float = 10.0, scale: float = 1.0):
+    """Two identical blocks, each carrying a light half and a dark half, held ``gap``
+    apart in x (the whole model scaled by ``scale``). Clustering by colour alone
+    splits light-vs-dark *across* both blocks; by locality it splits block-vs-block —
+    the lamp's top/base failure in miniature. Faces 0-3 are block A, 4-7 block B,
+    each block's shades ordered [light, light, dark, dark]."""
+    texture = np.array([[LIGHT, DARK]], dtype=np.uint8)  # 2×1: left light, right dark
+    shades = [0.2, 0.2, 0.8, 0.8]  # u<0.5 → light, u>0.5 → dark
+    verts, faces, uv = [], [], []
+    fi = 0
+    for block_x in (0.0, gap):
+        for u in shades:
+            base = 3 * fi
+            verts += [[block_x, 0, 0], [block_x + 1, 0, 0], [block_x, 1, 0]]
+            faces.append([base, base + 1, base + 2])
+            uv += [[u, 0.5]] * 3
+            fi += 1
+    mesh = trimesh.Trimesh(
+        vertices=np.array(verts, float) * scale,
+        faces=np.array(faces, np.int64),
+        visual=trimesh.visual.TextureVisuals(uv=np.array(uv)),
+        process=False,
+    )
+    return mesh, texture
+
+
+def test_pure_colour_merges_separated_blocks_high_locality_splits_them():
+    """Two same-shaded blocks held apart: clustering on colour alone splits by shade,
+    so each cluster spans *both* blocks (the blocks are not separated); high locality
+    splits by block instead, each block landing wholly in one cluster (the lamp fix)."""
+    mesh, texture = _two_blocks_mesh(gap=10.0)
+    block_a, block_b = slice(0, 4), slice(4, 8)
+
+    colour_only = segment(mesh, texture, k=2, locality=0.0)
+    assert len(set(colour_only[block_a])) == 2  # shade split crosses the block...
+    assert len(set(colour_only[block_b])) == 2  # ...so both blocks are mixed
+
+    by_locality = segment(mesh, texture, k=2, locality=300.0)
+    assert len(set(by_locality[block_a])) == 1  # each block wholly in one cluster
+    assert len(set(by_locality[block_b])) == 1
+    assert by_locality[0] != by_locality[4]     # the two blocks are different clusters
+
+
+def test_locality_split_is_invariant_to_model_scale():
+    """Position is normalized to the model's bounding box, so the same locality weight
+    produces the same split whether the model is tiny or huge — the control means the
+    same across models."""
+    small, texture = _two_blocks_mesh(gap=10.0, scale=1.0)
+    large, _ = _two_blocks_mesh(gap=10.0, scale=100.0)
+
+    labels_small = segment(small, texture, k=2, locality=300.0)
+    labels_large = segment(large, texture, k=2, locality=300.0)
+
+    assert np.array_equal(labels_small, labels_large)
+
+
+def test_locality_clustering_is_deterministic():
+    """A fixed seed makes the locality-weighted split repeatable run to run."""
+    mesh, texture = _two_blocks_mesh(gap=10.0)
+
+    first = segment(mesh, texture, k=2, locality=120.0)
+    second = segment(mesh, texture, k=2, locality=120.0)
+
+    assert np.array_equal(first, second)
+
+
+def test_split_by_colour_with_locality_carves_spatial_blocks():
+    """Through the partition, high locality carves the two separated blocks into two
+    Parts — each spatial block wholly its own — and the partition stays exhaustive."""
+    mesh, texture = _two_blocks_mesh(gap=10.0)
+    partition = Partition.fresh(face_count=8)
+
+    new_ids = split_by_colour(partition, mesh, texture, k=2, locality=300.0)
+
+    labels = partition.labels
+    assert len(new_ids) == 2
+    assert len(set(labels[0:4])) == 1 and len(set(labels[4:8])) == 1  # block-separated
+    assert labels[0] != labels[4]
+    assert sum(partition.face_count(p.id) for p in partition.parts) == 8
+
+
 def test_split_scoped_to_unassigned_leaves_existing_parts_untouched():
     """Split-by-material runs on Unassigned by default: it carves k new Parts from the
     not-yet-assigned faces and never disturbs Parts the designer already made."""

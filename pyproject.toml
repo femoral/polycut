@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polycut"
-version = "0.1.6"
+version = "0.1.7"
 description = "Desktop tool that turns a high-poly Meshy Source model into a SketchUp-ready file (simplify + convert to DAE)."
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]

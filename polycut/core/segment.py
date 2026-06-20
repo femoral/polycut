@@ -83,31 +83,58 @@ def face_colours(mesh, texture: np.ndarray) -> np.ndarray:
     return colours
 
 
-def segment(mesh, texture: np.ndarray, k: int = 2) -> np.ndarray:
-    """Cluster the mesh's faces by baked colour into ``k`` groups → per-face labels.
+def segment(mesh, texture: np.ndarray, k: int = 2, locality: float = 0.0) -> np.ndarray:
+    """Cluster the mesh's faces into ``k`` groups → per-face labels.
 
     Colours are compared in **CIELAB** (perceptual distance, not raw RGB), so lit
-    and shadowed wood land closer than wood and fabric. Mesh-agnostic: it reads only
-    UVs + texture, blind to whether ``mesh`` is the Source or the cut. The fixed
-    ``random_state`` keeps the labels deterministic for a given input.
+    and shadowed wood land closer than wood and fabric. ``locality`` blends in
+    spatial position (ADR-0008): faces both similar in colour and near in space land
+    together, so two same-shade regions held apart split once locality is high
+    enough. Mesh-agnostic apart from the centroids it reads for locality; the fixed
+    ``random_state`` keeps the labels deterministic.
     """
-    return _cluster(face_colours(mesh, texture), k)
+    return _cluster(face_colours(mesh, texture), k, _locality_positions(mesh, locality), locality)
 
 
-def _cluster(colours: np.ndarray, k: int) -> np.ndarray:
-    """k-means in CIELAB over an ``(n, 3)`` RGB array → an ``(n,)`` cluster label per
-    row. The fixed ``random_state`` makes the labels deterministic."""
+def _cluster(
+    colours: np.ndarray, k: int, positions: np.ndarray | None = None, locality: float = 0.0
+) -> np.ndarray:
+    """k-means over the augmented feature ``[Lab colour, λ·normalized position]`` → an
+    ``(n,)`` cluster label per row. ``locality`` 0 (or no positions) collapses to
+    colour alone — exactly today's labels. The fixed ``random_state`` is deterministic.
+    """
     lab = rgb2lab(colours.reshape(-1, 1, 3).astype(np.float64) / 255.0).reshape(-1, 3)
+    if locality > 0 and positions is not None:
+        feature = np.hstack([lab, locality * np.asarray(positions, dtype=np.float64)])
+    else:
+        feature = lab
     kmeans = KMeans(n_clusters=k, n_init=10, random_state=0)
-    return kmeans.fit_predict(lab).astype(np.int32)
+    return kmeans.fit_predict(feature).astype(np.int32)
 
 
-def colour_clusters(mesh, texture: np.ndarray, scope_faces: np.ndarray, k: int) -> np.ndarray:
+def _locality_positions(mesh, locality: float) -> np.ndarray | None:
+    """Face centroids normalized to the model's bounding box (so the locality weight
+    means the same regardless of model scale), or ``None`` when locality is off."""
+    if locality <= 0:
+        return None
+    lo, hi = np.asarray(mesh.bounds, dtype=np.float64)
+    span = hi - lo
+    span[span == 0] = 1.0  # a flat axis contributes no spatial spread
+    return (np.asarray(mesh.triangles_center, dtype=np.float64) - lo) / span
+
+
+def colour_clusters(
+    mesh, texture: np.ndarray, scope_faces: np.ndarray, k: int, locality: float = 0.0
+) -> np.ndarray:
     """k-means labels (0…k−1) for just ``scope_faces`` — the heavy compute, no
     partition mutation. Split out of :func:`split_by_colour` so a caller can run it
     on a worker thread and apply the relabel on the GUI thread (#29 cluster off-thread).
+    Positions are normalized over the whole model, then scoped, so the locality weight
+    is consistent regardless of which Part is being subdivided.
     """
-    return _cluster(face_colours(mesh, texture)[scope_faces], k)
+    positions = _locality_positions(mesh, locality)
+    scoped_positions = positions[scope_faces] if positions is not None else None
+    return _cluster(face_colours(mesh, texture)[scope_faces], k, scoped_positions, locality)
 
 
 def apply_clusters(
@@ -141,14 +168,16 @@ def split_by_colour(
     texture: np.ndarray,
     k: int = 2,
     scope: int = UNASSIGNED_ID,
+    locality: float = 0.0,
 ) -> list[int]:
     """Cluster only the faces ``scope`` owns into ``k`` new Parts, leaving every other
     Part untouched. Writes through :meth:`Partition.assign`, so the partition stays
-    exhaustive and non-overlapping. Returns the new Part ids. The synchronous
-    compute-then-apply; the off-thread path calls the two halves separately.
+    exhaustive and non-overlapping. ``locality`` weighs spatial separation (ADR-0008).
+    Returns the new Part ids. The synchronous compute-then-apply; the off-thread path
+    calls the two halves separately.
     """
     scope_faces = np.where(partition.labels == scope)[0]
     if scope_faces.size == 0:  # nothing to carve (e.g. everything already assigned)
         return []
-    clusters = colour_clusters(mesh, texture, scope_faces, k)
+    clusters = colour_clusters(mesh, texture, scope_faces, k, locality)
     return apply_clusters(partition, scope, scope_faces, clusters, k)
