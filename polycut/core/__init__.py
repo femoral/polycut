@@ -5,7 +5,13 @@ it through a thin bridge object, never the other way around.
 """
 
 from polycut.core.brush import SpatialBrush
-from polycut.core.export import ExportResult, export_collada, export_gltf, export_model
+from polycut.core.export import (
+    ExportResult,
+    export_collada,
+    export_gltf,
+    export_model,
+    export_obj,
+)
 from polycut.core.model import ColourSignal, SceneObject, SourceModel, load_source_model
 from polycut.core.orient import UP_AXES, remap_up_axis
 from polycut.core.parts import UNASSIGNED_ID, Part, Partition
@@ -53,6 +59,7 @@ __all__ = [
     "export_collada",
     "export_gltf",
     "export_model",
+    "export_obj",
     "face_colour_signal",
     "face_colours",
     "load_source_model",

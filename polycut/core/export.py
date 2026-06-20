@@ -20,6 +20,7 @@ self-contained, portable export.
 
 from __future__ import annotations
 
+import io
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -248,6 +249,79 @@ def export_gltf(
         face_count=int(mesh.faces.shape[0]),
         texture_count=len(used_textures),
     )
+
+
+def export_obj(
+    model,
+    output_path,
+    partition: Partition | None = None,
+    unit_name: str = "meter",
+    unit_meters: float = 1.0,
+) -> ExportResult:
+    """Write ``model`` to a ``.obj`` + sibling ``.mtl`` and report what was produced.
+
+    One ``.obj`` carries a per-Part ``g`` group with its own ``usemtl`` over a shared
+    vertex pool; the ``.mtl`` declares one material per non-empty Part, each with its
+    own ``map_Kd`` (ADR-0007 multi-texture), and the textures are copied beside the
+    output and referenced by relative name (no absolute paths). A single-Part model
+    degrades to one group + one material. The geometry is already baked to scale by
+    the caller; OBJ has no unit metadata, so ``unit_name``/``unit_meters`` are
+    accepted for a uniform writer signature only.
+    """
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    mtl_path = output_path.with_suffix(".mtl")
+
+    mesh = _single_mesh(model.geometry)
+    if partition is None:  # no Parts → one group over the whole mesh
+        partition = Partition.fresh(int(mesh.faces.shape[0]))
+
+    texture_names = _copy_textures(model, output_path.parent)
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    uv = getattr(mesh.visual, "uv", None)
+    uv = np.asarray(uv, dtype=np.float64) if uv is not None else np.zeros((len(vertices), 2))
+    normals = np.asarray(mesh.vertex_normals, dtype=np.float64)
+    labels = partition.labels
+
+    obj = io.StringIO()
+    obj.write(f"mtllib {mtl_path.name}\n")
+    np.savetxt(obj, vertices, fmt="v %.6f %.6f %.6f")
+    np.savetxt(obj, uv, fmt="vt %.6f %.6f")
+    np.savetxt(obj, normals, fmt="vn %.6f %.6f %.6f")
+
+    materials = []  # (material name, texture name | None) per non-empty Part, in order
+    for part in partition.parts:
+        face_idx = np.where(labels == part.id)[0]
+        if face_idx.size == 0:  # only non-empty Parts become groups
+            continue
+        index = _resolve_texture_index(part, len(texture_names))
+        materials.append((part.material_slot, texture_names[index] if index is not None else None))
+        obj.write(f"g {part.name}\nusemtl {part.material_slot}\n")
+        # f v/vt/vn per corner; OBJ is 1-based and shares one index across the inputs.
+        corners = np.repeat(mesh.faces[face_idx] + 1, 3, axis=1)
+        np.savetxt(obj, corners, fmt="f %d/%d/%d %d/%d/%d %d/%d/%d")
+
+    output_path.write_text(obj.getvalue())
+    _write_mtl(mtl_path, materials)
+
+    return ExportResult(
+        output_path=output_path,
+        output_size_bytes=output_path.stat().st_size,
+        face_count=int(mesh.faces.shape[0]),
+        texture_count=len(texture_names),
+    )
+
+
+def _write_mtl(mtl_path: Path, materials) -> None:
+    """One ``newmtl`` per Part — its diffuse colour and, when textured, its
+    ``map_Kd`` pointing at the copied image by relative name."""
+    lines = []
+    for name, texture_name in materials:
+        lines.append(f"newmtl {name}")
+        lines.append("Kd 0.800000 0.800000 0.800000")
+        if texture_name:
+            lines.append(f"map_Kd {texture_name}")
+    mtl_path.write_text("\n".join(lines) + "\n")
 
 
 def _build_submesh(part_faces, vertices, normals, uv, image) -> trimesh.Trimesh:
