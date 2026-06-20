@@ -15,6 +15,11 @@
 #   python -m venv .venv && .venv/bin/pip install -e '.[gui,dev]'
 # The shell prepends .venv/bin to PATH when it exists, so `python` / `pytest`
 # resolve to the venv automatically.
+#
+# git-lfs is on PATH (NixOS ships no system git-lfs): the heavy sofa test fixture
+# (tests/fixtures/meshy_sofa/) is stored in Git LFS. The shell runs
+# `git lfs install --local` for you; after a fresh clone, run `git lfs pull` once
+# to fetch the real fixture (a clone made without git-lfs leaves pointer files).
 
 { pkgs ? import <nixpkgs> { } }:
 
@@ -58,7 +63,8 @@ let
 in
 pkgs.mkShell {
   # python313 matches the venv interpreter; used to (re)create the venv.
-  packages = [ pkgs.python313 ];
+  # git-lfs: the sofa test fixture lives in Git LFS, and NixOS has no system one.
+  packages = [ pkgs.python313 pkgs.git-lfs ];
 
   shellHook = ''
     # /run/opengl-driver/lib (the NixOS hardware-GL vendor dir) must come first,
@@ -73,6 +79,11 @@ pkgs.mkShell {
     export PYTHONPATH="$PWD''${PYTHONPATH:+:$PYTHONPATH}"
     if [ -d .venv ]; then
       export PATH="$PWD/.venv/bin:$PATH"
+    fi
+    # Wire up the LFS filters in this repo once (idempotent); the sofa fixture is
+    # stored in LFS. Run `git lfs pull` after a fresh clone to fetch the bytes.
+    if [ -d .git ] && ! git config --local --get filter.lfs.clean >/dev/null 2>&1; then
+      git lfs install --local >/dev/null 2>&1 || true
     fi
     echo "polycut dev shell · GUI: python -m polycut.app · tests: QT_QPA_PLATFORM=offscreen pytest -q -m 'not slow'"
   '';

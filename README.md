@@ -107,6 +107,11 @@ on the GPU rather than falling back to the llvmpipe software renderer. Create th
 `python` and `pytest` resolve to the venv automatically. The tests run headless
 under `QT_QPA_PLATFORM=offscreen`.
 
+The heavy end-to-end fixture (the 646k-face sofa) is stored in Git LFS. The
+`nix-shell` dev shell puts `git-lfs` on `PATH` and wires up the filters; run
+`git lfs pull` once after cloning to fetch it. The `slow` tests need that
+fixture, so `-m "not slow"` skips both them and the download.
+
 ## Package (Windows)
 
 PyInstaller bundles the app, including PyMeshLab's native binaries, into a
