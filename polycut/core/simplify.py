@@ -17,9 +17,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import numpy as np
 import trimesh
 
 from polycut.core.model import SourceModel
+from polycut.core.parts import Partition
 
 
 @dataclass(frozen=True)
@@ -123,6 +125,105 @@ class ModelSimplifier:
 
     def __exit__(self, *exc: object) -> None:
         self.close()
+
+
+def simplify_parts(
+    model: SourceModel,
+    partition: Partition,
+    target_faces: int,
+    preserve: PreserveOptions = PreserveOptions(),
+) -> tuple[SourceModel, Partition]:
+    """Decimate each Part's faces independently, preserving the carve (ADR-0007).
+
+    For a model that already carries Parts (a multi-material import), the whole-mesh
+    collapse would scramble the partition. Instead each non-empty Part's submesh is
+    reduced on its own — toward the same ratio ``target_faces / model.face_count``
+    applied to that submesh — and the reduced submeshes are fused back into one mesh.
+    Returns the reduced :class:`SourceModel` (intact per-vertex UVs + normals, ready
+    for the exporters) and a **remapped** :class:`Partition` whose labels are valid on
+    the new face set, every Part keeping its name/colour/slot/texture.
+
+    Tractable precisely because imported materials are already separate pieces, so the
+    soup's seam problem (ADR-0004) doesn't apply. The global ``preserve`` settings
+    apply to each submesh; per-Part budgets are out of scope.
+    """
+    import pymeshlab  # heavy native dep; import lazily so load/export stay light
+
+    mesh = model.geometry if isinstance(model.geometry, trimesh.Trimesh) else model.geometry.dump(concatenate=True)
+    vertices = np.asarray(mesh.vertices, dtype=np.float64)
+    faces = np.asarray(mesh.faces, dtype=np.int64)
+    uv = getattr(mesh.visual, "uv", None)
+    uv = np.asarray(uv, dtype=np.float64) if uv is not None else np.zeros((len(vertices), 2))
+    labels = partition.labels
+    ratio = target_faces / max(1, model.face_count)
+
+    blocks_v, blocks_f, blocks_uv, blocks_n, block_labels = [], [], [], [], []
+    offset = 0
+    for part in partition.parts:
+        face_idx = np.where(labels == part.id)[0]
+        if face_idx.size == 0:  # empty Part (e.g. Unassigned) keeps its slot, no faces
+            continue
+        used, inverse = np.unique(faces[face_idx], return_inverse=True)
+        local_faces = inverse.reshape(-1, 3)
+        sub_target = max(_MIN_SUBMESH_FACES, round(ratio * face_idx.size))
+        rv, rf, ruv, rn = _decimate_submesh(
+            pymeshlab, vertices[used], local_faces, uv[used], sub_target, preserve
+        )
+        blocks_v.append(rv)
+        blocks_f.append(rf + offset)
+        blocks_uv.append(ruv)
+        blocks_n.append(rn)
+        block_labels.append(np.full(len(rf), part.id, dtype=np.int32))
+        offset += len(rv)
+
+    reduced = trimesh.Trimesh(
+        vertices=np.vstack(blocks_v),
+        faces=np.vstack(blocks_f),
+        vertex_normals=np.vstack(blocks_n),
+        visual=trimesh.visual.TextureVisuals(uv=np.vstack(blocks_uv)),
+        process=False,
+    )
+    reduced_model = SourceModel(
+        source_path=model.source_path,
+        geometry=reduced,
+        face_count=int(reduced.faces.shape[0]),
+        object_count=len(block_labels),  # one submesh per non-empty Part
+        textures=model.textures,
+        colour_signal=model.colour_signal,
+    )
+    remapped = Partition(np.concatenate(block_labels), {p.id: p for p in partition.parts})
+    return reduced_model, remapped
+
+
+_MIN_SUBMESH_FACES = 4  # never decimate a Part below a tetrahedron's worth of faces
+
+
+def _decimate_submesh(pymeshlab, vertices, faces, uv, target_faces, preserve):
+    """Texture-preserving quadric collapse of one Part's submesh, in memory.
+
+    The submesh is loaded from matrices with per-vertex texcoords, transferred to
+    wedge coords (what the texture-aware collapse needs), reduced, then transferred
+    back to per-vertex. Returns ``(vertices, faces, uv, vertex_normals)``."""
+    submesh = pymeshlab.Mesh(vertex_matrix=vertices, face_matrix=faces, v_tex_coords_matrix=uv)
+    ms = pymeshlab.MeshSet()
+    ms.add_mesh(submesh)
+    ms.compute_texcoord_transfer_vertex_to_wedge()
+    ms.meshing_decimation_quadric_edge_collapse_with_texture(
+        targetfacenum=int(target_faces),
+        preserveboundary=preserve.boundary,
+        preservenormal=preserve.normals,
+        extratcoordw=1.0 if preserve.uv_seams else 0.0,
+        planarquadric=preserve.hard_edges,
+        optimalplacement=True,
+    )
+    ms.compute_texcoord_transfer_wedge_to_vertex()
+    reduced = ms.current_mesh()
+    return (
+        reduced.vertex_matrix(),
+        reduced.face_matrix(),
+        reduced.vertex_tex_coord_matrix(),
+        reduced.vertex_normal_matrix(),
+    )
 
 
 def _collapse_current(

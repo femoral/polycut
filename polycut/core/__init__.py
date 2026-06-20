@@ -25,7 +25,12 @@ from polycut.core.picking import (
 from polycut.core.scale import scale_factor, scale_geometry
 from polycut.core.segment import face_colour_signal, face_colours, segment, split_by_colour
 from polycut.core.transform import Transform
-from polycut.core.simplify import ModelSimplifier, PreserveOptions, simplify_model
+from polycut.core.simplify import (
+    ModelSimplifier,
+    PreserveOptions,
+    simplify_model,
+    simplify_parts,
+)
 from polycut.core.viewport import (
     Attr,
     Buffers,
@@ -70,6 +75,7 @@ __all__ = [
     "scale_geometry",
     "segment",
     "simplify_model",
+    "simplify_parts",
     "split_by_colour",
     "subtract_from_part",
 ]
