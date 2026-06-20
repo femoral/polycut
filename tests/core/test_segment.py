@@ -18,7 +18,7 @@ import trimesh
 from PIL import Image
 
 from polycut.core.parts import UNASSIGNED_ID, Partition
-from polycut.core.segment import face_colours, segment, split_by_colour
+from polycut.core.segment import face_colour_signal, face_colours, segment, split_by_colour
 
 BROWN = (120, 72, 36)
 GREY = (160, 160, 160)
@@ -49,6 +49,75 @@ def test_face_colour_is_the_texel_at_the_mean_uv():
 
     assert tuple(colours[0]) == BROWN  # face 0 sampled the left texel
     assert tuple(colours[1]) == GREY   # face 1 sampled the right texel
+
+
+# --- Generalized per-face colour signal (MVP-4 slice C, ADR-0007) ---------------
+# The Auto-cluster + wand resolve each face's colour in order: its own material's
+# texture texel → its per-vertex colour → none. The signal returns a per-face colour
+# plus a validity mask; geometry-only faces are invalid (Auto-cluster unavailable).
+
+
+def test_colour_signal_single_texture_matches_the_per_face_texel():
+    """For a single-texture model the generalized signal reproduces today's sampling
+    — each face's colour is the texel at its mean UV — and every face is valid."""
+    mesh, texture = _two_colour_mesh()
+
+    colours, valid = face_colour_signal(mesh, [texture], face_textures=[0, 0])
+
+    assert tuple(colours[0]) == BROWN  # face 0 sampled the left texel
+    assert tuple(colours[1]) == GREY   # face 1 sampled the right texel
+    assert valid.tolist() == [True, True]
+
+
+def test_each_face_samples_its_own_materials_texture():
+    """In a multi-textured model each face reads from its *own* material's texture —
+    so two pieces with identical UVs but different textures get different colours
+    (the single-shared-texture assumption is gone)."""
+    tex_brown = np.array([[BROWN]], dtype=np.uint8)  # 1×1 solid textures
+    tex_grey = np.array([[GREY]], dtype=np.uint8)
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0]], float)
+    faces = np.array([[0, 1, 2], [1, 3, 2]], np.int64)
+    mesh = trimesh.Trimesh(
+        vertices=verts,
+        faces=faces,
+        visual=trimesh.visual.TextureVisuals(uv=np.zeros((4, 2))),  # identical UVs
+        process=False,
+    )
+
+    colours, valid = face_colour_signal(mesh, [tex_brown, tex_grey], face_textures=[0, 1])
+
+    assert tuple(colours[0]) == BROWN
+    assert tuple(colours[1]) == GREY
+    assert valid.all()
+
+
+def test_vertex_coloured_faces_average_their_vertices():
+    """With no texture, each face's colour is the average of its three vertices'
+    per-vertex colours — so a vertex-coloured PLY still feeds the Auto-cluster."""
+    verts = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0]], float)
+    faces = np.array([[0, 1, 2]], np.int64)
+    mesh = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
+    vertex_colours = np.array([[60, 0, 0, 255], [0, 60, 0, 255], [0, 0, 60, 255]])
+
+    colours, valid = face_colour_signal(
+        mesh, textures=[], face_textures=[-1], vertex_colours=vertex_colours
+    )
+
+    assert tuple(colours[0]) == (20, 20, 20)  # mean of the three RGB triples
+    assert valid.tolist() == [True]
+
+
+def test_geometry_only_signal_is_all_invalid():
+    """A geometry-only model — no texture, no per-vertex colour — yields an all-invalid
+    mask: the Auto-cluster is unavailable rather than clustering on nothing."""
+    mesh = trimesh.creation.box()
+    n = len(mesh.faces)
+
+    colours, valid = face_colour_signal(
+        mesh, textures=[], face_textures=np.full(n, -1)
+    )
+
+    assert not valid.any()
 
 
 def _striped_mesh(n_each):

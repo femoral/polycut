@@ -23,17 +23,64 @@ from sklearn.cluster import KMeans
 from polycut.core.parts import UNASSIGNED_ID, Partition
 
 
-def face_colours(mesh, texture: np.ndarray) -> np.ndarray:
-    """Per-face baked colour: the texel at the mean of each face's vertex UVs.
+def face_colour_signal(
+    mesh, textures, face_textures, vertex_colours: np.ndarray | None = None
+):
+    """Per-face colour + a per-face **validity mask**, resolved in order (ADR-0007):
+    the face's own material's UV texel → its per-vertex colour → none.
 
-    ``texture`` is an ``(H, W, 3)`` RGB array. UV ``v`` is bottom-up, image rows are
-    top-down, so the row is flipped. Returns an ``(n_faces, 3)`` ``uint8`` array.
+    ``textures`` is a list indexed by texture id (``(H, W, 3)`` RGB arrays, ``None``
+    for a slot with no image). ``face_textures`` is a per-face texture id (``-1`` for
+    a face with no source texture) — material-aware, so each face reads from *its
+    own* texture in a multi-textured model. ``vertex_colours`` (``(n_verts, 3|4)``)
+    is the fallback. A face with neither resolves invalid (geometry-only → the
+    Auto-cluster is unavailable). Returns ``(colours (n,3) uint8, valid (n,) bool)``.
     """
-    mean_uv = mesh.visual.uv[mesh.faces].mean(axis=1)  # (n_faces, 2)
+    face_textures = np.asarray(face_textures)
+    n = int(face_textures.shape[0])
+    colours = np.zeros((n, 3), dtype=np.uint8)
+    valid = np.zeros(n, dtype=bool)
+
+    uv = getattr(mesh.visual, "uv", None)
+    if uv is not None and len(textures):
+        mean_uv = np.asarray(uv)[mesh.faces].mean(axis=1)  # (n, 2)
+        for tex_id, texture in enumerate(textures):
+            if texture is None:
+                continue
+            sel = face_textures == tex_id
+            if sel.any():
+                colours[sel] = _sample_texels(texture, mean_uv[sel])
+                valid[sel] = True
+
+    if vertex_colours is not None:
+        fallback = ~valid
+        if fallback.any():
+            per_face = np.asarray(vertex_colours)[:, :3][mesh.faces].mean(axis=1)
+            colours[fallback] = per_face[fallback].astype(np.uint8)
+            valid[fallback] = True
+
+    return colours, valid
+
+
+def _sample_texels(texture: np.ndarray, mean_uv: np.ndarray) -> np.ndarray:
+    """The texels at ``mean_uv``. UV ``v`` is bottom-up, image rows top-down, so the
+    row is flipped; out-of-range UVs clamp to the edge."""
     height, width = texture.shape[:2]
     cols = np.clip((mean_uv[:, 0] * width).astype(np.int64), 0, width - 1)
     rows = np.clip(((1.0 - mean_uv[:, 1]) * height).astype(np.int64), 0, height - 1)
     return texture[rows, cols]
+
+
+def face_colours(mesh, texture: np.ndarray) -> np.ndarray:
+    """Per-face baked colour for a **single** shared texture — the texel at the mean
+    of each face's vertex UVs. The single-texture view of :func:`face_colour_signal`
+    (every face on texture 0), kept for the existing colour-cluster + wand callers.
+    Returns an ``(n_faces, 3)`` ``uint8`` array.
+    """
+    colours, _ = face_colour_signal(
+        mesh, [texture], np.zeros(len(mesh.faces), dtype=np.int64)
+    )
+    return colours
 
 
 def segment(mesh, texture: np.ndarray, k: int = 2) -> np.ndarray:

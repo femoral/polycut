@@ -17,7 +17,7 @@ from polycut.core.picking import (
     subtract_from_part,
 )
 from polycut.core.scale import scale_factor, scale_geometry
-from polycut.core.segment import face_colours, segment, split_by_colour
+from polycut.core.segment import face_colour_signal, face_colours, segment, split_by_colour
 from polycut.core.transform import Transform
 from polycut.core.simplify import ModelSimplifier, PreserveOptions, simplify_model
 from polycut.core.viewport import (
@@ -52,6 +52,7 @@ __all__ = [
     "colour_wand",
     "export_collada",
     "export_model",
+    "face_colour_signal",
     "face_colours",
     "load_source_model",
     "pick_face",
