@@ -13,7 +13,7 @@ QT_QPA_PLATFORM=offscreen pytest -q -m "not slow"   # run the suite headless
 
 Tests must run `offscreen` (no display); the GUI defaults to the `xcb` backend (override `QT_QPA_PLATFORM=wayland` for a native Wayland window). Drop `-m "not slow"` to include the 646k-face Meshy fixture end-to-end.
 
-The slow Meshy fixture (`tests/fixtures/meshy_sofa/`) is stored in Git LFS. The dev shell provides `git-lfs` and runs `git lfs install --local`; after a fresh clone run `git lfs pull` once to fetch the bytes (a clone made without git-lfs leaves pointer files).
+The slow Meshy fixture (`tests/fixtures/meshy_sofa/`) is stored in Git LFS. The dev shell provides `git-lfs` and configures the LFS filters locally (not `git lfs install`, which would write hooks into a possibly-global `core.hooksPath`); after a fresh clone run `git lfs pull` once to fetch the bytes (a clone made without git-lfs leaves pointer files).
 
 ## Commit workflow
 

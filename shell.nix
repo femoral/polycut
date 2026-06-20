@@ -17,9 +17,9 @@
 # resolve to the venv automatically.
 #
 # git-lfs is on PATH (NixOS ships no system git-lfs): the heavy sofa test fixture
-# (tests/fixtures/meshy_sofa/) is stored in Git LFS. The shell runs
-# `git lfs install --local` for you; after a fresh clone, run `git lfs pull` once
-# to fetch the real fixture (a clone made without git-lfs leaves pointer files).
+# (tests/fixtures/meshy_sofa/) is stored in Git LFS. The shell configures the LFS
+# filters for this repo only; after a fresh clone, run `git lfs pull` once to
+# fetch the real fixture (a clone made without git-lfs leaves pointer files).
 
 { pkgs ? import <nixpkgs> { } }:
 
@@ -80,10 +80,16 @@ pkgs.mkShell {
     if [ -d .venv ]; then
       export PATH="$PWD/.venv/bin:$PATH"
     fi
-    # Wire up the LFS filters in this repo once (idempotent); the sofa fixture is
-    # stored in LFS. Run `git lfs pull` after a fresh clone to fetch the bytes.
+    # Configure the LFS filters for this repo only (idempotent), and deliberately
+    # NOT via `git lfs install`: that also installs hooks into git's hooksPath,
+    # which can be a shared/global dir, making every other repo invoke git-lfs.
+    # The filters alone smudge/clean the LFS-tracked sofa fixture; `git lfs pull`
+    # fetches it and `git lfs push` uploads changes (rare — the fixture is static).
     if [ -d .git ] && ! git config --local --get filter.lfs.clean >/dev/null 2>&1; then
-      git lfs install --local >/dev/null 2>&1 || true
+      git config --local filter.lfs.clean  "git-lfs clean -- %f"
+      git config --local filter.lfs.smudge "git-lfs smudge -- %f"
+      git config --local filter.lfs.process "git-lfs filter-process"
+      git config --local filter.lfs.required true
     fi
     echo "polycut dev shell · GUI: python -m polycut.app · tests: QT_QPA_PLATFORM=offscreen pytest -q -m 'not slow'"
   '';
