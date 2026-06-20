@@ -320,6 +320,20 @@ class Processor(QObject):
 
     defaultExportPath = Property(str, _get_default_export_path, notify=statsChanged)
 
+    def _get_export_name_filters(self) -> list:
+        """The save-dialog file-type filters (MVP-4 slice I): the generic export
+        formats the writers cover, DAE first as the SketchUp interim hand-off. The
+        chosen filter sets the extension, which ``export_model`` dispatches on. SKP
+        joins this list when its (parked) slice lands, gated by ``skp_available``."""
+        return [
+            "Collada (*.dae)",
+            "glTF Binary (*.glb)",
+            "glTF (*.gltf)",
+            "Wavefront OBJ (*.obj)",
+        ]
+
+    exportNameFilters = Property("QVariantList", _get_export_name_filters, constant=True)
+
     # ---- load ----------------------------------------------------------
     @Slot(str)
     def loadFile(self, path: str) -> None:
@@ -672,7 +686,7 @@ class Processor(QObject):
             self.exportFailed.emit("No model loaded")
             return
         out = _to_path(output_path)
-        self._set_status("Exporting to DAE…")
+        self._set_status(f"Exporting to {out.suffix.lstrip('.').upper() or 'file'}…")
         self._set_busy(True)
         self._set_op("exporting")  # the universal chip reads "exporting…"
         threading.Thread(target=self._export_worker, args=(out,), daemon=True).start()

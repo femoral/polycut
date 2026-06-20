@@ -52,24 +52,46 @@ def export_model(
     transform: Transform,
     partition: Partition | None = None,
 ) -> ExportResult:
-    """Run the whole transform→parts→export pipeline and write the ``.dae``.
+    """Run the whole transform→parts→export pipeline and dispatch by output format.
 
     Bakes ``transform`` into the geometry (scale + up-axis), degrades a partition
     whose label count no longer matches the transformed mesh to a single group (a
-    stale carve from a prior cut), and writes the Collada file declaring the
-    Transform's target unit. The single headless entry point a Qt worker — or a
-    future CLI — drives; the Collada writer below stays the low-level writer.
+    stale carve from a prior cut), and writes the file with the writer chosen by the
+    output's extension — Collada (``.dae``), glTF/GLB (``.glb`` / ``.gltf``), or OBJ
+    (``.obj``) (ADR-0007). The single headless entry point a Qt worker — or a future
+    CLI — drives; the per-format writers below stay the low-level writers.
     """
+    output_path = Path(output_path)
+    writer = _writer_for(output_path)
     model = transform.apply(model)
     if partition is not None and len(partition.labels) != model.face_count:
         partition = None  # stale carve (face set changed) — fall back to one group
-    return export_collada(
+    return writer(
         model,
         output_path,
         partition=partition,
         unit_name=transform.unit_name,
         unit_meters=transform.unit_meters,
     )
+
+
+# The generic export formats and their writers, keyed by extension (ADR-0007). SKP is
+# slice L (parked); the SketchUp hand-off stays on DAE in the interim.
+EXPORT_FORMATS = (".dae", ".glb", ".gltf", ".obj")
+
+
+def _writer_for(output_path: Path):
+    """The writer for an output's extension, or a clear error for an unknown one."""
+    writers = {
+        ".dae": export_collada,
+        ".glb": export_gltf,
+        ".gltf": export_gltf,
+        ".obj": export_obj,
+    }
+    writer = writers.get(output_path.suffix.lower())
+    if writer is None:
+        raise ValueError(f"unsupported export format: {output_path.suffix!r}")
+    return writer
 
 
 def export_collada(

@@ -46,10 +46,10 @@ ApplicationWindow {
     }
     FileDialog {
         id: saveDialog
-        title: "Export to DAE"
+        title: "Export"
         fileMode: FileDialog.SaveFile
-        defaultSuffix: "dae"
-        nameFilters: ["Collada (*.dae)"]
+        defaultSuffix: "dae"  // DAE is the interim SketchUp hand-off; the filter picks the rest
+        nameFilters: processor.exportNameFilters
         onAccepted: processor.exportModel(selectedFile)
     }
 
@@ -442,7 +442,7 @@ ApplicationWindow {
                     onClicked: openDialog.open()
                 }
                 PillButton {
-                    text: "Export to DAE"
+                    text: "Export"
                     primary: true
                     enabled: processor.hasModel && !processor.busy
                     onClicked: {

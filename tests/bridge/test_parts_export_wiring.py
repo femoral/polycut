@@ -82,6 +82,30 @@ def test_export_writes_the_carved_parts_as_named_groups(qapp, tmp_path):
     assert {m.name for m in doc.materials} == {"frame", "cushions"}
 
 
+def test_export_dispatches_to_glb_through_the_worker(qapp, tmp_path):
+    """Exporting to a .glb path drives the off-thread worker to the glTF writer — the
+    written file is a glTF binary, dispatched by extension (MVP-4 slice I)."""
+    model = _textured_model(tmp_path, n_faces=4)
+    proc = Processor()
+    _bind_model(proc, model)
+
+    out = tmp_path / "out.glb"
+    proc.exportModel(str(out))
+    _wait_export(proc, out)
+
+    assert out.read_bytes()[:4] == b"glTF"
+
+
+def test_processor_exposes_the_available_export_formats(qapp):
+    """The processor exposes the export formats for the save-dialog filter — DAE, GLB
+    and OBJ — so the designer can pick the format when saving."""
+    proc = Processor()
+
+    joined = " ".join(proc.exportNameFilters).lower()
+
+    assert "*.dae" in joined and "*.glb" in joined and "*.obj" in joined
+
+
 def test_export_with_no_parts_carved_writes_a_single_group(qapp, tmp_path):
     """No Parts carved → the model still exports as one valid group, unchanged from
     the pre-Parts single-mesh writer (the fresh all-Unassigned partition is a no-op)."""

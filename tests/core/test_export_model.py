@@ -14,6 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import trimesh
 from collada import Collada
 from PIL import Image
@@ -72,6 +73,43 @@ def _faces_model(n_faces=4):
         vertices=np.array(verts, float), faces=np.array(faces, np.int64), process=False
     )
     return SourceModel(Path("m.obj"), mesh, n_faces, 1, ())
+
+
+# --- Format dispatch by output extension (MVP-4 slice I) -------------------------
+
+
+def test_export_model_dispatches_to_glb_by_extension(tmp_path):
+    """A ``.glb`` output dispatches to the glTF writer — the file is a glTF binary
+    (its ``glTF`` magic), not a Collada document at the wrong extension."""
+    model = _faces_model(4)
+    transform = Transform(1.0, "m", "m", "y")
+
+    out = tmp_path / "out.glb"
+    export_model(model, out, transform)
+
+    assert out.read_bytes()[:4] == b"glTF"
+
+
+def test_export_model_dispatches_to_obj_by_extension(tmp_path):
+    """A ``.obj`` output dispatches to the OBJ writer — a text .obj with a sibling
+    .mtl, reloading as mesh geometry."""
+    model = _faces_model(4)
+    transform = Transform(1.0, "m", "m", "y")
+
+    out = tmp_path / "out.obj"
+    export_model(model, out, transform)
+
+    assert out.with_suffix(".mtl").exists()
+    assert out.read_text().lstrip().startswith(("mtllib", "v "))
+
+
+def test_export_model_rejects_an_unsupported_format(tmp_path):
+    """An unknown extension is refused rather than silently writing the wrong file."""
+    model = _faces_model(4)
+    transform = Transform(1.0, "m", "m", "y")
+
+    with pytest.raises(ValueError):
+        export_model(model, tmp_path / "out.xyz", transform)
 
 
 def test_a_stale_partition_degrades_to_one_group(tmp_path):
