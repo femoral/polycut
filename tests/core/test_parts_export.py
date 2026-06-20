@@ -17,10 +17,20 @@ import trimesh
 from collada import Collada
 from PIL import Image
 
+from collada import material as collada_material
+
 from polycut.core.export import export_collada
 from polycut.core.model import SourceModel
 from polycut.core.parts import Partition
 from polycut.core.segment import split_by_colour
+
+
+def _surface_image_path(mat) -> str | None:
+    """The image filename the Part's material samples — its effect's surface image."""
+    for param in mat.effect.params:
+        if isinstance(param, collada_material.Surface):
+            return param.image.path
+    return None
 
 
 def _textured_model(directory: Path, n_faces: int = 4) -> SourceModel:
@@ -48,6 +58,75 @@ def _textured_model(directory: Path, n_faces: int = 4) -> SourceModel:
         object_count=1,
         textures=(texture_path,),
     )
+
+
+def _two_texture_model(directory: Path, n_faces: int = 4) -> SourceModel:
+    """A model with TWO distinct source textures on disk — material 0 (frame) and
+    material 1 (cushion), each its own image, so the export must emit both."""
+    t0 = directory / "frame.png"
+    Image.new("RGB", (4, 4), (200, 40, 40)).save(t0)
+    t1 = directory / "cushion.png"
+    Image.new("RGB", (4, 4), (40, 40, 200)).save(t1)
+
+    verts, faces, uv = [], [], []
+    for i in range(n_faces):
+        base = 3 * i
+        verts += [[i, 0, 0], [i + 1, 0, 0], [i, 1, 0]]
+        faces.append([base, base + 1, base + 2])
+        uv += [[0.5, 0.5]] * 3
+    mesh = trimesh.Trimesh(
+        vertices=np.array(verts, float),
+        faces=np.array(faces, np.int64),
+        visual=trimesh.visual.TextureVisuals(uv=np.array(uv)),
+        process=False,
+    )
+    return SourceModel(
+        source_path=directory / "model.glb",
+        geometry=mesh,
+        face_count=n_faces,
+        object_count=2,
+        textures=(t0, t1),
+    )
+
+
+def test_multi_texture_export_emits_one_image_per_texture_each_part_its_own(tmp_path):
+    """A model with two distinct source textures exports a .dae with two images, each
+    Part's material sampling its own — the single shared-texture assumption is gone."""
+    model = _two_texture_model(tmp_path, n_faces=4)
+    half = model.face_count // 2
+    face_materials = np.array([0] * half + [1] * (model.face_count - half))
+    partition = Partition.from_materials(face_materials, ["frame", "cushion"], [0, 1])
+    out = tmp_path / "out.dae"
+
+    result = export_collada(model, out, partition=partition)
+
+    assert result.texture_count == 2
+    doc = Collada(str(out))
+    assert len(doc.images) == 2
+    assert {img.path for img in doc.images} == {"frame.png", "cushion.png"}
+    by_name = {m.name: _surface_image_path(m) for m in doc.materials}
+    assert by_name["frame"] == "frame.png"      # each Part samples its own image
+    assert by_name["cushion"] == "cushion.png"
+    assert (out.parent / "frame.png").exists() and (out.parent / "cushion.png").exists()
+
+
+def test_unmaterialed_part_in_a_multi_texture_model_exports_untextured(tmp_path):
+    """In a multi-texture model, a Part with no source texture (Unassigned holding
+    the unmaterialed faces) exports as its own untextured slot — it never borrows
+    another Part's image."""
+    model = _two_texture_model(tmp_path, n_faces=6)
+    face_materials = np.array([0, 0, 1, 1, -1, -1])  # faces 4,5 unmaterialed
+    partition = Partition.from_materials(face_materials, ["frame", "cushion"], [0, 1])
+    out = tmp_path / "out.dae"
+
+    export_collada(model, out, partition=partition)
+
+    doc = Collada(str(out))
+    assert len(doc.images) == 2
+    by_name = {m.name: _surface_image_path(m) for m in doc.materials}
+    assert by_name["frame"] == "frame.png"
+    assert by_name["cushion"] == "cushion.png"
+    assert by_name["Unassigned"] is None  # untextured, not borrowing an image
 
 
 def _two_part_partition(face_count: int) -> Partition:

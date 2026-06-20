@@ -6,9 +6,10 @@ imports Collada with full material/UV fidelity and it needs no C++ SDK.
 The model is carved into **Parts** (slice A/B); this writer emits **shape B**
 (ADR-0004): one ``<node>``/``<geometry>`` per Part, Part-named, each with its own
 ``<material>``/``<effect>`` so SketchUp shows N named, separately-selectable groups
-with N swappable material slots. All Parts **share the single baked texture** — one
-``<library_images>`` entry, distinct effects sampling it — so the model looks
-identical on import but carries reassignable slots. With no partition (or a single
+with N swappable material slots. Each Part's effect samples **its own** texture —
+one ``<library_images>`` entry per distinct source image (ADR-0007 multi-texture),
+each Part referencing its image by index. A single-texture model emits one shared
+image (every Part samples it) — parity with today. With no partition (or a single
 Unassigned Part owning everything) this degrades to today's single-group export.
 
 trimesh's own Collada writer drops the baked texture (it emits materials but no
@@ -30,7 +31,7 @@ from collada import Collada, geometry, material, scene, source
 from polycut.core.parts import Partition
 from polycut.core.transform import Transform
 
-SHARED_IMAGE_ID = "texture-image"  # one <library_images> entry, shared by all Parts
+IMAGE_ID = "texture-image"  # <library_images> id stem; one entry per distinct texture
 
 
 @dataclass(frozen=True)
@@ -93,25 +94,33 @@ def export_collada(
     if partition is None:  # no Parts → one group over the whole mesh
         partition = Partition.fresh(int(mesh.faces.shape[0]))
 
-    texture_name = _copy_texture(model, output_path.parent)
-    _write_collada(mesh, partition, output_path, texture_name, unit_name, unit_meters)
+    texture_names = _copy_textures(model, output_path.parent)
+    _write_collada(mesh, partition, output_path, texture_names, unit_name, unit_meters)
 
     return ExportResult(
         output_path=output_path,
         output_size_bytes=output_path.stat().st_size,
         face_count=int(mesh.faces.shape[0]),
-        texture_count=1 if texture_name else 0,
+        texture_count=len(texture_names),
     )
 
 
-def _copy_texture(model, dest_dir: Path) -> str | None:
-    """Copy the baked texture beside the output; return its relative name."""
-    if not model.has_texture:
-        return None
-    dest = dest_dir / model.texture_path.name
-    if model.texture_path.resolve() != dest.resolve():
-        shutil.copy2(model.texture_path, dest)
-    return dest.name
+def _copy_textures(model, dest_dir: Path) -> list[str]:
+    """Copy each distinct source texture beside the output; return their relative
+    names, parallel to ``model.textures`` (so a Part's texture index still selects
+    the right one). Basename collisions across source dirs are disambiguated."""
+    names: list[str] = []
+    used: set[str] = set()
+    for texture in model.textures:
+        name = texture.name
+        if name in used:  # two source textures share a basename — keep both distinct
+            name = f"{texture.stem}-{len(names)}{texture.suffix}"
+        dest = dest_dir / name
+        if texture.resolve() != dest.resolve():
+            shutil.copy2(texture, dest)
+        used.add(name)
+        names.append(name)
+    return names
 
 
 def _single_mesh(geom) -> trimesh.Trimesh:
@@ -125,19 +134,21 @@ def _write_collada(
     mesh: trimesh.Trimesh,
     partition: Partition,
     output_path: Path,
-    texture_name: str | None,
+    texture_names: list[str],
     unit_name: str,
     unit_meters: float,
 ) -> None:
-    """Build the Collada document — one group per non-empty Part, sharing the texture."""
+    """Build the Collada document — one group per non-empty Part, each sampling its
+    own image, with one ``<library_images>`` entry per distinct source texture."""
     doc = Collada()
     doc.assetInfo.unitname = unit_name
     doc.assetInfo.unitmeter = unit_meters
 
-    image = None
-    if texture_name:
-        image = material.CImage(SHARED_IMAGE_ID, texture_name)
+    images = []
+    for i, name in enumerate(texture_names):
+        image = material.CImage(f"{IMAGE_ID}-{i}", name)
         doc.images.append(image)
+        images.append(image)
 
     # Read the mesh's own cached normals + UVs once; per-Part geometry slices them,
     # never recomputing (a recompute on the heavy mesh is a slow scipy fallback).
@@ -154,6 +165,7 @@ def _write_collada(
         face_idx = np.where(labels == part.id)[0]
         if face_idx.size == 0:  # Unassigned (or any Part) exports only when non-empty
             continue
+        image = _part_image(part, images)
         nodes.append(
             _build_part(doc, part, mesh.faces[face_idx], vertices, normals, uv, image)
         )
@@ -162,6 +174,20 @@ def _write_collada(
     doc.scenes.append(myscene)
     doc.scene = myscene
     doc.write(str(output_path))
+
+
+def _part_image(part, images):
+    """The image a Part samples: its own ``texture`` index, or — when it has none and
+    the model carries a single image — that shared image (single-texture parity).
+    A Part with no texture in a multi-texture model exports as an untextured slot."""
+    if not images:
+        return None
+    index = part.texture
+    if index is None:
+        index = 0 if len(images) == 1 else None
+    if index is None or index >= len(images):
+        return None
+    return images[index]
 
 
 def _build_part(doc, part, part_faces, vertices, normals, uv, image) -> scene.Node:
