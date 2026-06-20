@@ -46,7 +46,7 @@ def _textured_model(directory: Path, n_faces: int = 4) -> SourceModel:
         geometry=mesh,
         face_count=n_faces,
         object_count=1,
-        texture_path=texture_path,
+        textures=(texture_path,),
     )
 
 

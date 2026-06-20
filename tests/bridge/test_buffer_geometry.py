@@ -35,7 +35,7 @@ def _quad_buffers():
         ),
         process=False,
     )
-    model = SourceModel(Path("quad.obj"), mesh, 2, 1, None)
+    model = SourceModel(Path("quad.obj"), mesh, 2, 1, ())
     return build_mesh_buffers(model)
 
 
@@ -111,7 +111,7 @@ def test_adapter_re_uploads_when_the_source_changes(qapp):
         vertex_normals=np.tile([0.0, 0.0, 1.0], (3, 1)),
         process=False,
     )
-    source.set(build_mesh_buffers(SourceModel(Path("t.obj"), triangle, 1, 1, None)))
+    source.set(build_mesh_buffers(SourceModel(Path("t.obj"), triangle, 1, 1, ())))
 
     assert bytes(geom.indexData()) != before
 

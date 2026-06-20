@@ -56,6 +56,7 @@ def remap_up_axis(model: SourceModel, up_axis: str) -> SourceModel:
         geometry=geometry,
         face_count=model.face_count,
         object_count=model.object_count,
-        texture_path=model.texture_path,
+        textures=model.textures,
+        colour_signal=model.colour_signal,
         objects=model.objects,
     )

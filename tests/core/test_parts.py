@@ -209,3 +209,93 @@ def test_merge_cannot_drop_unassigned():
 
     with pytest.raises(ValueError):
         partition.merge(frame, UNASSIGNED_ID)  # would drop Unassigned
+
+
+# --- Initial partition from a source's materials (MVP-4 slice A, ADR-0007) -------
+# An imported model's existing materials seed the starting Parts: each material
+# becomes a Part to refine, faces with no material fall to Unassigned, and the
+# partition invariant holds from the first frame.
+
+
+def test_from_materials_seeds_one_part_per_material_plus_unassigned():
+    """A model with two source materials opens already split into those two Parts,
+    named by the material — the import keeps the structure the source tool gave it
+    instead of starting from one blob. Unassigned is still present as the remainder."""
+    face_materials = np.array([0, 0, 0, 1, 1, 1])  # faces 0-2 frame, 3-5 cushion
+
+    partition = Partition.from_materials(
+        face_materials,
+        material_names=["frame", "cushion"],
+        material_textures=[0, 1],
+    )
+
+    names = {p.name for p in partition.parts}
+    assert names == {"Unassigned", "frame", "cushion"}
+
+    frame = next(p for p in partition.parts if p.name == "frame")
+    cushion = next(p for p in partition.parts if p.name == "cushion")
+    assert partition.face_count(frame.id) == 3
+    assert partition.face_count(cushion.id) == 3
+    # exhaustive + non-overlapping from the start
+    assert sum(partition.face_count(p.id) for p in partition.parts) == 6
+
+
+def test_from_materials_faces_with_no_material_land_in_unassigned():
+    """A face the source left without a material falls to Unassigned, so the
+    partition still covers every face (the import's leftover, not an error)."""
+    face_materials = np.array([0, 0, -1, 1, -1, 1])  # faces 2 and 4 unmaterialed
+
+    partition = Partition.from_materials(
+        face_materials,
+        material_names=["wood", "fabric"],
+        material_textures=[0, 1],
+    )
+
+    assert partition.face_count(UNASSIGNED_ID) == 2
+    assert sum(partition.face_count(p.id) for p in partition.parts) == 6
+
+
+def test_from_materials_single_material_stays_one_unassigned_blob():
+    """The Meshy case — one baked material over the whole mesh — opens as a single
+    Unassigned blob (zero user Parts) to be carved by hand, not a pre-seeded Part.
+    Parity with today's single-material path (glossary: 'zero user Parts')."""
+    face_materials = np.zeros(5, dtype=int)  # every face on the one material
+
+    partition = Partition.from_materials(
+        face_materials, material_names=["baked"], material_textures=[0],
+    )
+
+    assert [p.id for p in partition.parts] == [UNASSIGNED_ID]
+    assert partition.face_count(UNASSIGNED_ID) == 5
+
+
+def test_from_materials_each_part_references_its_own_texture():
+    """Each initial Part carries its own texture reference — an index into the
+    model's textures — so a multi-textured import keeps every piece's appearance.
+    Two materials sharing one image point at the same index."""
+    face_materials = np.array([0, 1, 2])
+
+    partition = Partition.from_materials(
+        face_materials,
+        material_names=["frame", "left cushion", "right cushion"],
+        material_textures=[0, 1, 1],  # the two cushions share image 1
+    )
+
+    by_name = {p.name: p for p in partition.parts}
+    assert by_name["frame"].texture == 0
+    assert by_name["left cushion"].texture == 1
+    assert by_name["right cushion"].texture == 1
+
+
+def test_texture_reference_survives_serialisation():
+    """A Part's texture reference round-trips through serialisation, so a saved
+    multi-textured carve reopens pointing at the right images (not all at None)."""
+    partition = Partition.from_materials(
+        np.array([0, 1]),
+        material_names=["frame", "cushion"],
+        material_textures=[0, 1],
+    )
+
+    restored = Partition.from_dict(partition.to_dict())
+
+    assert restored.parts == partition.parts

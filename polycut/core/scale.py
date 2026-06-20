@@ -94,5 +94,6 @@ def scale_geometry(model: SourceModel, factor: float) -> SourceModel:
         geometry=geometry,
         face_count=model.face_count,
         object_count=model.object_count,
-        texture_path=model.texture_path,
+        textures=model.textures,
+        colour_signal=model.colour_signal,
     )

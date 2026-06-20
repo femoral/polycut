@@ -40,7 +40,7 @@ def _quad_model(path, texture=None):
         geometry=mesh,
         face_count=2,
         object_count=1,
-        texture_path=Path(texture) if texture else None,
+        textures=(Path(texture),) if texture else (),
     )
 
 
@@ -57,7 +57,7 @@ def _triangle_model(path):
         geometry=mesh,
         face_count=1,
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 

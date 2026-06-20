@@ -3,9 +3,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 import trimesh
+
+
+class ColourSignal(Enum):
+    """How the Auto-cluster reads a model's colour (ADR-0007).
+
+    ``TEXTURE`` — sample a baked UV texture; ``VERTEX`` — fall back to per-vertex
+    colour; ``NONE`` — geometry-only, no colour to cluster on (the Auto-cluster is
+    disabled and the model is carved only by hand).
+    """
+
+    TEXTURE = "texture"
+    VERTEX = "vertex"
+    NONE = "none"
 
 
 @dataclass(frozen=True)
@@ -20,22 +34,35 @@ class SceneObject:
 class SourceModel:
     """A loaded Source model plus the stats shown after import.
 
-    Holds the trimesh geometry so the export step can reuse it without
-    re-reading the file. ``texture_path`` is the baked texture resolved from
-    the sibling ``.mtl`` (``None`` when Meshy's texture didn't travel with the
-    ``.obj`` — the missing-texture case).
+    Holds the trimesh geometry so the export step can reuse it without re-reading
+    the file. ``textures`` are the model's distinct baked images (ADR-0007's
+    multi-texture model, replacing the single shared-texture assumption); each Part
+    references one by index. Empty when no texture travelled with the file (the
+    missing-texture / geometry-only case). ``colour_signal`` is what the
+    Auto-cluster reads. ``texture_path`` is the single-texture view the Meshy path
+    keeps for parity — the first image, or ``None``.
     """
 
     source_path: Path
     geometry: trimesh.Trimesh | trimesh.Scene
     face_count: int
     object_count: int
-    texture_path: Path | None
+    textures: tuple[Path, ...] = ()
+    colour_signal: ColourSignal = ColourSignal.TEXTURE
     objects: tuple[SceneObject, ...] = ()  # the model's composition, for the outliner
 
     @property
+    def texture_path(self) -> Path | None:
+        """The first baked texture — the single-texture view kept for the Meshy path."""
+        return self.textures[0] if self.textures else None
+
+    @property
     def has_texture(self) -> bool:
-        return self.texture_path is not None
+        return bool(self.textures)
+
+    @property
+    def texture_count(self) -> int:
+        return len(self.textures)
 
 
 def load_source_model(obj_path) -> SourceModel:
@@ -62,12 +89,14 @@ def load_source_model(obj_path) -> SourceModel:
         for i, m in enumerate(meshes)
     )
 
+    texture = _resolve_texture(obj_path)
     return SourceModel(
         source_path=obj_path,
         geometry=geometry,
         face_count=face_count,
         object_count=len(meshes),
-        texture_path=_resolve_texture(obj_path),
+        textures=(texture,) if texture else (),
+        colour_signal=ColourSignal.TEXTURE if texture else ColourSignal.NONE,
         objects=objects,
     )
 

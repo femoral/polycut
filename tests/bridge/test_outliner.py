@@ -37,7 +37,7 @@ def _model_with_objects(path, objects):
         geometry=mesh,
         face_count=sum(f for _, f in objects),
         object_count=len(objects),
-        texture_path=None,
+        textures=(),
         objects=objs,
     )
 

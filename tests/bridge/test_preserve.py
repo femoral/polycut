@@ -31,7 +31,7 @@ def _model(path="couch.obj"):
         geometry=mesh,
         face_count=200,
         object_count=1,
-        texture_path=None,
+        textures=(),
         objects=(SceneObject(name=Path(path).stem, face_count=200),),
     )
 

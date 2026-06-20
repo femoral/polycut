@@ -6,7 +6,7 @@ it through a thin bridge object, never the other way around.
 
 from polycut.core.brush import SpatialBrush
 from polycut.core.export import ExportResult, export_collada, export_model
-from polycut.core.model import SceneObject, SourceModel, load_source_model
+from polycut.core.model import ColourSignal, SceneObject, SourceModel, load_source_model
 from polycut.core.orient import UP_AXES, remap_up_axis
 from polycut.core.parts import UNASSIGNED_ID, Part, Partition
 from polycut.core.picking import (
@@ -32,6 +32,7 @@ from polycut.core.viewport import (
 __all__ = [
     "Attr",
     "Buffers",
+    "ColourSignal",
     "ExportResult",
     "ModelSimplifier",
     "Part",

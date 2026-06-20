@@ -28,7 +28,7 @@ from .test_parts_view import _pick_mesh  # the textured pickable mesh + helpers
 def _geom_source_model(path, mesh):
     return SourceModel(
         source_path=Path(path), geometry=mesh, face_count=int(mesh.faces.shape[0]),
-        object_count=1, texture_path=None,
+        object_count=1, textures=(),
         objects=(SceneObject(name=Path(path).stem, face_count=int(mesh.faces.shape[0])),),
     )
 

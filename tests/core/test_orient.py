@@ -25,7 +25,7 @@ def _box_model(extents):
         geometry=box,
         face_count=int(box.faces.shape[0]),
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 
@@ -73,7 +73,7 @@ def test_remap_rotates_the_cached_normals():
         vertex_normals=np.tile([0.0, 0.0, 1.0], (4, 1)),
         process=False,
     )
-    model = SourceModel(Path("quad.obj"), quad, 2, 1, None)
+    model = SourceModel(Path("quad.obj"), quad, 2, 1, ())
 
     result = remap_up_axis(model, "z")
 
@@ -93,7 +93,7 @@ def test_remap_uses_the_meshs_cached_normals_not_a_recompute():
         vertex_normals=np.tile([1.0, 0.0, 0.0], (4, 1)),  # bogus: +X, not the +Z face normal
         process=False,
     )
-    model = SourceModel(Path("quad.obj"), quad, 2, 1, None)
+    model = SourceModel(Path("quad.obj"), quad, 2, 1, ())
 
     result = remap_up_axis(model, "z")  # rotate −90° about X — leaves +X unchanged
 
@@ -107,7 +107,7 @@ def test_remap_keeps_topology_and_metadata():
         geometry=trimesh.creation.box(extents=(1.0, 2.0, 3.0)),
         face_count=12,
         object_count=1,
-        texture_path=Path("box.png"),
+        textures=(Path("box.png"),),
     )
 
     result = remap_up_axis(model, "z")

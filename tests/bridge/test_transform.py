@@ -34,7 +34,7 @@ def _box_model(path, extents, texture=None):
         geometry=mesh,
         face_count=int(mesh.faces.shape[0]),
         object_count=1,
-        texture_path=Path(texture) if texture else None,
+        textures=(Path(texture),) if texture else (),
     )
 
 

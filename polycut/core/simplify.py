@@ -53,8 +53,8 @@ def simplify_model(
     """Decimate ``model`` toward ``target_faces`` while preserving its texture.
 
     Returns a new :class:`SourceModel` whose geometry carries the reduced mesh
-    with intact UVs; ``texture_path`` is carried over unchanged so the export
-    copies the same baked texture beside the output. ``preserve`` selects which
+    with intact UVs; ``textures`` are carried over unchanged so the export copies
+    the same baked images beside the output. ``preserve`` selects which
     attributes the collapse holds onto (#13).
 
     Stateless: parses the ``.obj`` from disk every call. For repeated cuts of the
@@ -159,5 +159,6 @@ def _collapse_current(
         geometry=geometry,
         face_count=int(mesh.face_number()),
         object_count=1,
-        texture_path=model.texture_path,
+        textures=model.textures,
+        colour_signal=model.colour_signal,
     )

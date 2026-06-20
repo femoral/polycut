@@ -32,7 +32,7 @@ def _tiny_model(path, face_count):
         geometry=mesh,
         face_count=face_count,
         object_count=1,
-        texture_path=None,
+        textures=(),
         objects=(SceneObject(name=Path(path).stem, face_count=face_count),),
     )
 

@@ -29,7 +29,7 @@ def _box_model(extents=(1.0, 2.0, 3.0)):
         geometry=box,
         face_count=int(box.faces.shape[0]),
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 

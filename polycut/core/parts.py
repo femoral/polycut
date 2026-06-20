@@ -34,15 +34,37 @@ _PART_COLOURS = (
 )
 
 
+def _unassigned(texture: int | None = None) -> "Part":
+    """The built-in Unassigned Part (id 0) — the permanent partition remainder.
+
+    Carries a ``texture`` only in the single-material case, where the lone baked
+    texture rides on the blob so per-face colour sampling stays uniform (face → its
+    Part → texture)."""
+    return Part(
+        id=UNASSIGNED_ID,
+        name="Unassigned",
+        colour=UNASSIGNED_COLOUR,
+        material_slot="unassigned",
+        texture=texture,
+    )
+
+
 @dataclass(frozen=True)
 class Part:
-    """One row of the Part table."""
+    """One row of the Part table.
+
+    ``texture`` is the per-Part texture reference: an index into the
+    :class:`~polycut.core.model.SourceModel`'s ``textures`` (or ``None`` when the
+    Part has no source texture — Unassigned with unmaterialed faces, or a
+    geometry-only model).
+    """
 
     id: int
     name: str
     colour: tuple[int, int, int]
     material_slot: str
     visible: bool = True
+    texture: int | None = None
 
 
 class Partition:
@@ -56,13 +78,40 @@ class Partition:
     def fresh(cls, face_count: int) -> Partition:
         """A fresh partition: every face owned by Unassigned."""
         labels = np.zeros(face_count, dtype=np.int32)
-        unassigned = Part(
-            id=UNASSIGNED_ID,
-            name="Unassigned",
-            colour=UNASSIGNED_COLOUR,
-            material_slot="unassigned",
-        )
-        return cls(labels, {UNASSIGNED_ID: unassigned})
+        return cls(labels, {UNASSIGNED_ID: _unassigned()})
+
+    @classmethod
+    def from_materials(cls, face_materials, material_names, material_textures) -> Partition:
+        """Seed the initial partition from a source's per-face material assignment.
+
+        ``face_materials`` is a per-face index into ``material_names`` /
+        ``material_textures`` (``-1`` for a face with no source material). Each
+        material becomes a Part — named after the material, referencing its texture
+        — and the unmaterialed faces fall to Unassigned. The invariant holds from
+        the first frame: every face owned by exactly one Part.
+        """
+        face_materials = np.asarray(face_materials)
+        labels = np.zeros(face_materials.shape[0], dtype=np.int32)
+
+        if len(material_names) <= 1:
+            # The Meshy single-material (or geometry-only) case: one Unassigned blob
+            # to carve by hand — zero user Parts — carrying the lone texture if any.
+            return cls(labels, {UNASSIGNED_ID: _unassigned(
+                texture=material_textures[0] if material_textures else None
+            )})
+
+        parts = {UNASSIGNED_ID: _unassigned()}
+        for mat_idx, name in enumerate(material_names):
+            part_id = mat_idx + 1
+            parts[part_id] = Part(
+                id=part_id,
+                name=name,
+                colour=_PART_COLOURS[(part_id - 1) % len(_PART_COLOURS)],
+                material_slot=f"slot-{part_id}",
+                texture=material_textures[mat_idx],
+            )
+            labels[face_materials == mat_idx] = part_id
+        return cls(labels, parts)
 
     @property
     def labels(self) -> np.ndarray:
@@ -133,6 +182,7 @@ class Partition:
                     "colour": list(p.colour),
                     "material_slot": p.material_slot,
                     "visible": p.visible,
+                    "texture": p.texture,
                 }
                 for p in self._parts.values()
             ],
@@ -149,6 +199,7 @@ class Partition:
                 colour=tuple(row["colour"]),
                 material_slot=row["material_slot"],
                 visible=row["visible"],
+                texture=row.get("texture"),  # absent in pre-MVP-4 snapshots → None
             )
             for row in data["parts"]
         }

@@ -36,7 +36,7 @@ def _box_model(extents=(1.0, 2.0, 3.0)):
         geometry=box,
         face_count=int(box.faces.shape[0]),
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 
@@ -71,7 +71,7 @@ def _faces_model(n_faces=4):
     mesh = trimesh.Trimesh(
         vertices=np.array(verts, float), faces=np.array(faces, np.int64), process=False
     )
-    return SourceModel(Path("m.obj"), mesh, n_faces, 1, None)
+    return SourceModel(Path("m.obj"), mesh, n_faces, 1, ())
 
 
 def test_a_stale_partition_degrades_to_one_group(tmp_path):

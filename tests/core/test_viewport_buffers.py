@@ -53,7 +53,7 @@ def untextured_model():
         geometry=mesh,
         face_count=2,
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 
@@ -84,7 +84,7 @@ def textured_model(tmp_path):
         geometry=mesh,
         face_count=2,
         object_count=1,
-        texture_path=texture,
+        textures=(texture,),
     )
 
 
@@ -108,7 +108,7 @@ def multi_object_model():
         geometry=scene,
         face_count=4,
         object_count=2,
-        texture_path=None,
+        textures=(),
     )
 
 
@@ -158,7 +158,7 @@ def test_scene_buffers_carry_the_parts_own_normals():
         geometry=scene,
         face_count=4,
         object_count=2,
-        texture_path=None,
+        textures=(),
     )
 
     buffers = build_mesh_buffers(model)

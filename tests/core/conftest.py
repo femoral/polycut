@@ -46,7 +46,7 @@ def _model_from_obj(obj_path: Path, geometry) -> SourceModel:
         geometry=geometry,
         face_count=int(geometry.faces.shape[0]),
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 
@@ -109,7 +109,7 @@ def box_model():
         geometry=box,
         face_count=int(box.faces.shape[0]),
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 

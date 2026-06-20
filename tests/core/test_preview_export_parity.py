@@ -36,7 +36,7 @@ def _model(path):
         geometry=mesh,
         face_count=2,
         object_count=1,
-        texture_path=None,
+        textures=(),
     )
 
 
