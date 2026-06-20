@@ -81,6 +81,82 @@ ColumnLayout {
             }
         }
 
+        // ---- Colour ↔ Locality: weigh spatial separation vs colour (ADR-0008) --
+        // Drag toward locality to split same-shade regions held apart in space (the
+        // lamp's top/ring/base); the colour end is pure-colour clustering.
+        ColumnLayout {
+            visible: processor.parts.activeTool === "cluster"
+            Layout.fillWidth: true
+            spacing: Theme.gapXs
+
+            RowLayout {
+                Layout.fillWidth: true
+                Text {
+                    text: "colour"
+                    color: Theme.fg2
+                    font.family: Theme.fontUi
+                    font.pixelSize: Theme.fontSmall
+                }
+                Item { Layout.fillWidth: true }
+                Text {
+                    text: "locality"
+                    color: Theme.fg2
+                    font.family: Theme.fontUi
+                    font.pixelSize: Theme.fontSmall
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.gap
+
+                Slider {
+                    id: localitySlider
+                    Layout.fillWidth: true
+                    from: 0
+                    to: 1
+                    value: processor.parts.locality
+                    onMoved: processor.parts.locality = value
+
+                    background: Rectangle {
+                        x: localitySlider.leftPadding
+                        y: localitySlider.topPadding + localitySlider.availableHeight / 2 - height / 2
+                        width: localitySlider.availableWidth
+                        height: Theme.borderThick * 2
+                        radius: height / 2
+                        color: Theme.bg2
+                        Rectangle {
+                            width: localitySlider.position * parent.width
+                            height: parent.height
+                            radius: height / 2
+                            color: Theme.teal
+                        }
+                    }
+                    handle: Rectangle {
+                        x: localitySlider.leftPadding + localitySlider.position * (localitySlider.availableWidth - width)
+                        y: localitySlider.topPadding + localitySlider.availableHeight / 2 - height / 2
+                        implicitWidth: Theme.dotSize + Theme.gapXs
+                        implicitHeight: Theme.dotSize + Theme.gapXs
+                        radius: width / 2
+                        color: localitySlider.pressed ? Theme.tealDim : Theme.teal
+                    }
+                }
+                Rectangle {
+                    radius: Theme.rSm
+                    color: Theme.bg2
+                    implicitHeight: Theme.chipHeight
+                    implicitWidth: localityBadge.implicitWidth + Theme.chipPadH
+                    Text {
+                        id: localityBadge
+                        anchors.centerIn: parent
+                        text: Math.round(processor.parts.locality * 100) + "%"
+                        color: Theme.teal
+                        font.family: Theme.fontMono
+                        font.pixelSize: Theme.fontSmall
+                    }
+                }
+            }
+        }
+
         // ---- wand params: colour-match threshold + global / local -------------
         ColumnLayout {
             visible: processor.parts.activeTool === "wand"

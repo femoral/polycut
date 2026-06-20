@@ -35,6 +35,12 @@ from polycut.core.viewport import build_highlight_buffers, build_part_buffers, b
 
 TOOLS = ("cluster", "wand", "brush")  # auto-split, magic wand, spatial brush
 
+# The Colour↔Locality control is a 0..1 weight; this maps its locality end to the
+# cluster's internal λ (ADR-0008), scaled so a full slider clearly dominates colour
+# (Lab spans ~100) and lands the lamp's top/ring/base. Never shown to the user as λ.
+LOCALITY_SCALE = 200.0
+DEFAULT_LOCALITY = 0.35  # a modest default — real spatial influence, colour still leads
+
 
 class PartsViewModel(QObject):
     partsChanged = Signal()  # rows / total / hasParts moved
@@ -69,6 +75,7 @@ class PartsViewModel(QObject):
         self._active_part = UNASSIGNED_ID  # edits target the remainder until a Part exists
         self._active_tool = "cluster"  # the first manual tool in the panel
         self._cluster_k = 2  # split_by_colour's default
+        self._locality = DEFAULT_LOCALITY  # Colour↔Locality weight (0 colour … 1 locality)
         self._wand_threshold = 10.0  # CIELAB distance the wand counts as "similar"
         self._wand_global = False  # local (contiguous) wand by default
         self._brush_radius = 0.0  # set from the model's scale by QML before painting
@@ -190,6 +197,19 @@ class PartsViewModel(QObject):
 
     clusterK = Property(int, _get_cluster_k, _set_cluster_k, notify=toolParamsChanged)
 
+    def _get_locality(self) -> float:
+        return self._locality
+
+    def _set_locality(self, value: float) -> None:
+        """The Colour↔Locality slider position, clamped to [0, 1] — 0 is pure colour
+        (today's behaviour), 1 is maximum spatial locality (ADR-0008)."""
+        value = max(0.0, min(1.0, float(value)))
+        if value != self._locality:
+            self._locality = value
+            self.toolParamsChanged.emit()
+
+    locality = Property(float, _get_locality, _set_locality, notify=toolParamsChanged)
+
     def _get_wand_threshold(self) -> float:
         return self._wand_threshold
 
@@ -290,10 +310,11 @@ class PartsViewModel(QObject):
             return  # nothing to carve (e.g. everything already assigned)
         self._set_clustering(True)
         mesh, texture, k = self._mesh, self._texture, self._cluster_k
+        locality = self._locality * LOCALITY_SCALE  # snapshot the control on the GUI thread
 
         def work() -> None:
             try:
-                clusters = colour_clusters(mesh, texture, scope_faces, k)
+                clusters = colour_clusters(mesh, texture, scope_faces, k, locality)
             except Exception:  # a failed cluster clears the flag without carving
                 clusters = None
             self._clusterReady.emit(

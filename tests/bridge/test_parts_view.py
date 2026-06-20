@@ -289,6 +289,57 @@ def test_carve_input_is_dropped_while_a_cluster_is_in_flight(qapp):
     _settle_cluster(vm, qapp)
 
 
+# --- Colour↔Locality control (MVP-4 slice J, ADR-0008) ---------------------------
+
+
+def test_locality_defaults_to_a_modest_value_and_clamps():
+    """The Colour↔Locality control defaults to a modest locality (between pure colour
+    and full locality) and clamps to [0, 1]."""
+    vm = PartsViewModel()
+
+    assert 0.0 < vm.locality < 1.0  # a modest default, not pure colour
+
+    vm.locality = 2.0
+    assert vm.locality == 1.0  # clamped to the locality end
+    vm.locality = -1.0
+    assert vm.locality == 0.0  # clamped to the colour end
+
+
+def test_locality_value_reaches_the_off_thread_cluster(qapp, monkeypatch):
+    """Dragging the Colour↔Locality control changes the weight handed to the cluster:
+    the locality end passes a positive weight, the pure-colour end passes zero (today's
+    colour-only behaviour). The value reaches the off-thread k-means."""
+    import polycut.bridge.parts_view as pv
+
+    seen: list[float] = []
+    real = pv.colour_clusters
+
+    def spy(mesh, texture, scope_faces, k, locality=0.0):
+        seen.append(locality)
+        return real(mesh, texture, scope_faces, k, locality)
+
+    monkeypatch.setattr(pv, "colour_clusters", spy)
+    mesh, texture, centers = _pick_mesh()
+
+    locality_vm = PartsViewModel()
+    locality_vm.rebind(mesh, texture)
+    locality_vm.activeTool = "cluster"
+    locality_vm.clusterK = 2
+    locality_vm.locality = 1.0
+    _click(locality_vm, centers[0])
+    _settle_cluster(locality_vm, qapp)
+    assert seen[-1] > 0  # the locality end reaches the cluster as a positive weight
+
+    colour_vm = PartsViewModel()
+    colour_vm.rebind(mesh, texture)
+    colour_vm.activeTool = "cluster"
+    colour_vm.clusterK = 2
+    colour_vm.locality = 0.0
+    _click(colour_vm, centers[0])
+    _settle_cluster(colour_vm, qapp)
+    assert seen[-1] == 0.0  # the pure-colour end reaches it as zero (today's behaviour)
+
+
 def test_wand_and_brush_picks_stay_synchronous(qapp):
     """Wand and brush are cheap, so they keep carving on the GUI thread — a pick
     applies at once and never raises the clustering flag."""
