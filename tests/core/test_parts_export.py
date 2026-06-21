@@ -20,8 +20,8 @@ from PIL import Image
 from collada import material as collada_material
 
 from polycut.core.export import export_collada
-from polycut.core.model import SourceModel
-from polycut.core.parts import Partition
+from polycut.core.model import SourceModel, load_source_model
+from polycut.core.parts import UNASSIGNED_ID, Partition
 from polycut.core.segment import split_by_colour
 
 
@@ -108,6 +108,45 @@ def test_multi_texture_export_emits_one_image_per_texture_each_part_its_own(tmp_
     assert by_name["frame"] == "frame.png"      # each Part samples its own image
     assert by_name["cushion"] == "cushion.png"
     assert (out.parent / "frame.png").exists() and (out.parent / "cushion.png").exists()
+
+
+def test_part_names_round_trip_through_a_reopened_dae(tmp_path):
+    """A Part keeps its name when the exported .dae is reopened — the carve comes back
+    as "frame"/"cushions", not the geometry-id placeholder trimesh would otherwise read.
+    Drives the real exporter → loader round-trip (#34 follow-up)."""
+    model = _textured_model(tmp_path, n_faces=4)
+    partition = Partition.fresh(4)
+    frame = partition.create_part("frame")
+    cushions = partition.create_part("cushions")
+    partition.assign([0, 1], frame)
+    partition.assign([2, 3], cushions)
+    out = tmp_path / "out.dae"
+
+    export_collada(model, out, partition=partition)
+    reloaded = load_source_model(out)
+
+    names = {p.name for p in reloaded.initial_partition.parts if p.id != UNASSIGNED_ID}
+    assert names == {"frame", "cushions"}
+
+
+def test_part_names_with_spaces_and_collisions_export_to_valid_distinct_ids(tmp_path):
+    """Names that aren't valid XML ids (a space) or that collide both survive: the
+    space is sanitised and the duplicate is disambiguated, so the .dae stays valid
+    and reopens as two distinct Parts rather than one overwriting the other."""
+    model = _textured_model(tmp_path, n_faces=4)
+    partition = Partition.fresh(4)
+    a = partition.create_part("seat back")  # space → not a legal NCName
+    b = partition.create_part("seat back")  # identical → id collision
+    partition.assign([0, 1], a)
+    partition.assign([2, 3], b)
+    out = tmp_path / "out.dae"
+
+    export_collada(model, out, partition=partition)
+    reloaded = load_source_model(out)
+
+    user = [p for p in reloaded.initial_partition.parts if p.id != UNASSIGNED_ID]
+    assert len(user) == 2  # both Parts survived — neither clobbered the other
+    assert all(" " not in p.name for p in user)  # ids/names are space-free
 
 
 def test_unmaterialed_part_in_a_multi_texture_model_exports_untextured(tmp_path):

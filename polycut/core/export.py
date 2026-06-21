@@ -21,6 +21,7 @@ self-contained, portable export.
 from __future__ import annotations
 
 import io
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,6 +35,29 @@ from polycut.core.parts import Partition
 from polycut.core.transform import Transform
 
 IMAGE_ID = "texture-image"  # <library_images> id stem; one entry per distinct texture
+
+_NCNAME_BAD = re.compile(r"[^A-Za-z0-9_.-]")  # chars an XML NCName id may not hold
+
+
+def _geometry_id(part, used: set) -> str:
+    """A valid, unique XML id derived from the Part's name.
+
+    trimesh reads a reopened Collada mesh's name from its ``<geometry>`` *id* (it
+    ignores the ``name`` attribute), so the Part name must ride in the id for the
+    carve to round-trip by name instead of a ``geometry-N`` placeholder (#34
+    follow-up). Collada ids are NCNames — no spaces, starting with a letter or
+    ``_`` — so the name is sanitised (illegal chars → ``_``); an empty or colliding
+    result falls back to the stable ``part-<id>`` form."""
+    base = _NCNAME_BAD.sub("_", part.name).strip("_")
+    if not base:
+        base = f"part-{part.id}"
+    elif not (base[0].isalpha() or base[0] == "_"):
+        base = f"_{base}"
+    candidate, n = base, 2
+    while candidate in used:
+        candidate, n = f"{base}-{n}", n + 1
+    used.add(candidate)
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -185,13 +209,17 @@ def _write_collada(
     labels = partition.labels
 
     nodes = []
+    used_ids: set = set()  # keep each Part's name-derived geometry id unique
     for part in partition.parts:
         face_idx = np.where(labels == part.id)[0]
         if face_idx.size == 0:  # Unassigned (or any Part) exports only when non-empty
             continue
         image = _part_image(part, images)
         nodes.append(
-            _build_part(doc, part, mesh.faces[face_idx], vertices, normals, uv, image)
+            _build_part(
+                doc, part, mesh.faces[face_idx], vertices, normals, uv, image,
+                _geometry_id(part, used_ids),
+            )
         )
 
     myscene = scene.Scene("scene0", nodes)
@@ -362,13 +390,14 @@ def _build_submesh(part_faces, vertices, normals, uv, image) -> trimesh.Trimesh:
     return submesh
 
 
-def _build_part(doc, part, part_faces, vertices, normals, uv, image) -> scene.Node:
-    """A named ``<node>`` for one Part: its own geometry + material slot."""
+def _build_part(doc, part, part_faces, vertices, normals, uv, image, geom_id) -> scene.Node:
+    """A named ``<node>`` for one Part: its own geometry + material slot. ``geom_id``
+    is the Part-name-derived geometry id that round-trips the name on reopen."""
     effect, mat = _build_material(doc, part, image)
     doc.effects.append(effect)
     doc.materials.append(mat)
 
-    geom = _build_geometry(doc, part, part_faces, vertices, normals, uv)
+    geom = _build_geometry(doc, part, part_faces, vertices, normals, uv, geom_id)
     doc.geometries.append(geom)
 
     matnode = scene.MaterialNode(f"matref-{part.id}", mat, inputs=[("UVSET0", "TEXCOORD", "0")])
@@ -390,9 +419,11 @@ def _build_material(doc, part, image):
     return effect, material.Material(mat_id, part.name, effect)
 
 
-def _build_geometry(doc, part, part_faces, vertices, normals, uv) -> geometry.Geometry:
+def _build_geometry(doc, part, part_faces, vertices, normals, uv, geom_id) -> geometry.Geometry:
     """A compact Collada geometry for one Part — only the vertices its faces touch,
-    remapped to a local 0-based index, sharing one index per corner across inputs."""
+    remapped to a local 0-based index, sharing one index per corner across inputs.
+    Its id is ``geom_id`` (derived from the Part name) so trimesh reads the name back
+    on reopen; the per-source ids stay keyed on the stable Part id."""
     used, inverse = np.unique(part_faces, return_inverse=True)
     local_faces = inverse.reshape(-1, 3).astype(np.int64)
 
@@ -402,7 +433,7 @@ def _build_geometry(doc, part, part_faces, vertices, normals, uv) -> geometry.Ge
     uv_src = source.FloatSource(f"uv-{pid}", uv[used].ravel(), ("S", "T"))
 
     geom = geometry.Geometry(
-        doc, f"geometry-{pid}", part.name, [vert_src, normal_src, uv_src]
+        doc, geom_id, part.name, [vert_src, normal_src, uv_src]
     )
     input_list = source.InputList()
     input_list.addInput(0, "VERTEX", f"#verts-{pid}")
