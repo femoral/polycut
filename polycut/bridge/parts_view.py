@@ -80,13 +80,16 @@ class PartsViewModel(QObject):
         self._wand_global = False  # local (contiguous) wand by default
         self._brush_radius = 0.0  # set from the model's scale by QML before painting
 
-    def rebind(self, mesh, texture) -> None:
-        """Bind to a (simplified) mesh + its baked texture, starting a fresh partition
-        with every face in Unassigned. Called on each settled cut, so it also clears
-        any Parts carved against the previous mesh."""
+    def rebind(self, mesh, texture, partition: Partition | None = None) -> None:
+        """Bind to a (simplified) mesh + its baked texture. Without ``partition`` this
+        starts a fresh all-Unassigned partition — clearing any Parts carved against
+        the previous mesh (a new file load, or a whole-mesh re-cut). With one, it
+        adopts that partition instead: the imported Parts of a multi-material model,
+        or the carve carried forward through a per-Part simplify. The supplied
+        partition's labels must index ``mesh``'s faces."""
         self._mesh = mesh
         self._texture = texture
-        self._partition = Partition.fresh(face_count=len(mesh.faces))
+        self._partition = partition if partition is not None else Partition.fresh(face_count=len(mesh.faces))
         self._brush = SpatialBrush(mesh)  # built once per cut; brush drags reuse it
         self._active_part = UNASSIGNED_ID
         self._invalidate_geometry()

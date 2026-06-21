@@ -22,12 +22,14 @@ from polycut.bridge.buffer_source import BufferSource
 from polycut.bridge.parts_view import PartsViewModel
 from polycut.core import (
     UP_AXES,
+    UNASSIGNED_ID,
     ModelSimplifier,
     PreserveOptions,
     Transform,
     build_mesh_buffers,
     export_model,
     load_source_model,
+    simplify_parts,
 )
 from polycut.core.scale import UNIT_METERS, detect_source_unit
 
@@ -82,6 +84,10 @@ class Processor(QObject):
         self._model = None  # the loaded original (source for re-simplify)
         self._simplified = None  # current decimated model; what export writes
         self._target = 0  # requested target face count
+        # The Parts a multi-material model arrives carved into (its initial_partition),
+        # held from load until the first cut consumes it — so the imported Parts survive
+        # the default simplify instead of being rebound away (#34 round-trip).
+        self._import_partition = None
         # The two mesh buffer-sources the before/after split draws (#10): the original
         # is fed once on load and renders immediately; the simplified is refreshed
         # off-thread each time a cut settles. Render is decoupled from the cut
@@ -380,6 +386,10 @@ class Processor(QObject):
             return
         self._model = model
         self._simplified = None  # show the original until the default reduction lands
+        # A multi-material model opens already carved; carry those Parts into the first
+        # cut so the per-Part simplify preserves them (single-Unassigned models seed
+        # nothing — the whole-mesh fast path runs and the panel starts fresh as before).
+        self._import_partition = getattr(model, "initial_partition", None)
         # Pre-fill the source unit from the model's size — Meshy declares none. A
         # manual pick afterwards stays put (detection only runs here, on load). The
         # pre-fill is secondary: if a model can't be measured, keep the current unit
@@ -417,8 +427,27 @@ class Processor(QObject):
             self._simplify_active = True
         threading.Thread(target=self._simplify_loop, daemon=True).start()
 
+    @staticmethod
+    def _has_user_parts(partition) -> bool:
+        """True when a partition carries a Part beyond the permanent Unassigned
+        remainder — the signal to preserve the carve through simplify."""
+        return partition is not None and any(p.id != UNASSIGNED_ID for p in partition.parts)
+
     def _simplify_loop(self) -> None:
-        """Drain pending targets one at a time; never two decimations at once."""
+        """Drain pending targets one at a time; never two decimations at once.
+
+        When the model carries Parts — imported (a multi-material source) or carved —
+        the partition is carried forward through a per-Part collapse so the Parts
+        survive the cut (#34); otherwise the whole-mesh fast path runs and the Parts
+        panel rebinds fresh. The partition is threaded across iterations so a target
+        that supersedes a mid-run cut re-cuts from the just-reduced mesh it indexes."""
+        # The carve to preserve: the imported Parts on the first cut after load, else
+        # whatever is carved now. ``None`` means no Parts → whole-mesh path, fresh panel.
+        partition = self._import_partition or self._parts.export_partition()
+        self._import_partition = None  # consumed; later cuts read the live carve
+        if not self._has_user_parts(partition):
+            partition = None
+
         while True:
             with self._simplify_guard:
                 target = self._pending_target
@@ -428,9 +457,15 @@ class Processor(QObject):
                     return
 
             try:
-                simplified = self._simplifier_for(self._model).simplify(
-                    target, self._preserve  # the flags as of this cut
-                )
+                if partition is not None:
+                    base = self._simplified or self._model  # the model the carve indexes
+                    simplified, partition = simplify_parts(
+                        base, partition, target, self._preserve
+                    )
+                else:
+                    simplified = self._simplifier_for(self._model).simplify(
+                        target, self._preserve  # the flags as of this cut
+                    )
             except Exception as exc:
                 self._dispose_simplifier()
                 with self._simplify_guard:
@@ -449,7 +484,8 @@ class Processor(QObject):
                     continue  # a newer target arrived mid-run — serve it next
                 self._simplify_active = False
             self._refresh_mesh_view(simplified)  # feed the viewport off-thread
-            self._rebind_parts(simplified)  # Parts re-cut onto the fresh mesh (#25)
+            # Adopt the carried-forward carve (Parts preserved) or rebind fresh (#25).
+            self._rebind_parts(simplified, partition)
             self._set_busy(False)
             self._set_simplifying(False)  # fresh mesh swapped in — after-side un-dims
             self._set_op("")  # the cut landed — the chip clears
@@ -463,11 +499,13 @@ class Processor(QObject):
         """Feed the simplified (after) side with ``model``'s render buffers."""
         self._feed_mesh_view(self._simplified_mesh, model)
 
-    def _rebind_parts(self, model) -> None:
-        """Rebind the Parts view-model to the freshly-cut mesh + its baked texture,
-        clearing any Parts carved against the previous cut. Like the viewport, Parts
-        are a non-critical projection: if the texture can't be read, bind with none
-        (the brush still works) rather than break the load → export flow."""
+    def _rebind_parts(self, model, partition=None) -> None:
+        """Rebind the Parts view-model to the freshly-cut mesh + its baked texture.
+        With ``partition`` it adopts that carve (imported or carried forward); without
+        one it starts fresh, clearing any Parts carved against the previous cut. Like
+        the viewport, Parts are a non-critical projection: if the texture can't be
+        read, bind with none (the brush still works) rather than break the
+        load → export flow."""
         texture = None
         if model.texture_path:
             try:
@@ -475,7 +513,7 @@ class Processor(QObject):
             except Exception:
                 texture = None
         try:
-            self._parts.rebind(model.geometry, texture)
+            self._parts.rebind(model.geometry, texture, partition)
         except Exception:  # Parts are secondary — never break simplify/export
             pass
 
